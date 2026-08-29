@@ -1,0 +1,18 @@
+{
+  "groups": [
+    {
+      "name": "opencode.mcp",
+      "type": "ai.opencode.mcp.autoconfigure.McpFabricProperties",
+      "sourceType": "ai.opencode.mcp.autoconfigure.McpFabricProperties"
+    }
+  ],
+  "properties": [
+    { "name": "opencode.mcp.enabled", "type": "java.lang.Boolean", "defaultValue": true },
+    { "name": "opencode.mcp.endpoint", "type": "java.lang.String", "defaultValue": "/mcp" },
+    { "name": "opencode.mcp.server-name", "type": "java.lang.String", "defaultValue": "dataagent-mcp" },
+    { "name": "opencode.mcp.server-version", "type": "java.lang.String", "defaultValue": "0.1.0" },
+    { "name": "opencode.mcp.request-timeout", "type": "java.time.Duration", "defaultValue": "5m" },
+    { "name": "opencode.mcp.keep-alive", "type": "java.time.Duration" },
+    { "name": "opencode.mcp.max-request-size", "type": "org.springframework.util.unit.DataSize", "defaultValue": "16MB" }
+  ]
+}
