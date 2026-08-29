@@ -2,7 +2,7 @@ package ai.opencode.mcp.api;
 
 import java.util.Map;
 
-/** Framework-neutral programmatic tool definition used by API Fabric providers. */
+/** Normalized startup tool definition shared by local scanning and remote discovery. */
 public record ToolRegistration(
     String name,
     String title,

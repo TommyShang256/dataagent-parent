@@ -28,7 +28,6 @@ public record ToolAuditEvent(
 
   public enum Operation {
     REGISTER,
-    REMOVE,
     INVOKE
   }
 

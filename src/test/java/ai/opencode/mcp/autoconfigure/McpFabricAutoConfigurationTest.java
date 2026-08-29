@@ -12,13 +12,10 @@ import ai.opencode.mcp.audit.Slf4jToolAuditLogger;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
-import ai.opencode.mcp.remote.ApiFabricClient;
-import ai.opencode.mcp.remote.CseClient;
 import ai.opencode.mcp.remote.RemoteToolClient;
-import ai.opencode.mcp.remote.RemoteToolDefinition;
 import ai.opencode.mcp.scanner.McpToolScanner;
+import io.modelcontextprotocol.server.McpSyncServer;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -48,7 +45,7 @@ class McpFabricAutoConfigurationTest {
       assertThat(servletRegistration.getUrlMappings()).containsExactly("/mcp");
       var tools = context.getBean(McpToolRegistry.class).tools();
       assertThat(tools).extracting(ToolRegistration::name)
-          .containsExactlyInAnyOrder("local_echo", "fabric_echo", "server_comb_echo");
+          .containsExactlyInAnyOrder("local_echo", "fabric_echo", "server_comb_echo", "failing_tool");
       assertThat(tools).filteredOn(tool -> tool.name().equals("local_echo"))
           .extracting(ToolRegistration::origin)
           .containsExactly(ToolOrigin.local(LocalTools.class.getName()));
@@ -71,7 +68,7 @@ class McpFabricAutoConfigurationTest {
 
       var events = context.getBean(RecordingAuditLogger.class).events;
       assertThat(events).filteredOn(event -> event.operation() == ToolAuditEvent.Operation.REGISTER)
-          .hasSize(3)
+          .hasSize(4)
           .allMatch(event -> event.outcome() == ToolAuditEvent.Outcome.SUCCESS);
       assertThat(events).filteredOn(event -> event.operation() == ToolAuditEvent.Operation.INVOKE)
           .hasSize(3)
@@ -97,16 +94,6 @@ class McpFabricAutoConfigurationTest {
   void auditsFailedInvocationArguments() {
     runner.run(context -> {
       var registry = context.getBean(McpToolRegistry.class);
-      registry.register(new ToolRegistration(
-          "failing_tool",
-          null,
-          null,
-          Map.of("type", "object"),
-          arguments -> {
-            throw new IllegalStateException("sensitive failure detail");
-          },
-          ToolHints.DEFAULT));
-
       assertThatThrownBy(() -> invoke(registry, "failing_tool", Map.of("secret", "value")))
           .isInstanceOf(IllegalStateException.class);
       assertThat(context.getBean(RecordingAuditLogger.class).events)
@@ -119,6 +106,39 @@ class McpFabricAutoConfigurationTest {
             assertThat(event.arguments()).containsEntry("secret", "value");
             assertThat(event.result()).isNull();
           });
+    });
+  }
+
+  @Test
+  void advertisesOnlyToolsAndPublishesStartupCatalog() {
+    runner.run(context -> {
+      var server = context.getBean(McpSyncServer.class);
+      var capabilities = server.getServerCapabilities();
+
+      assertThat(capabilities.tools()).isNotNull();
+      assertThat(capabilities.tools().listChanged()).isFalse();
+      assertThat(capabilities.resources()).isNull();
+      assertThat(capabilities.prompts()).isNull();
+      assertThat(capabilities.completions()).isNull();
+      assertThat(server.listTools()).extracting(tool -> tool.name())
+          .containsExactlyInAnyOrder("local_echo", "fabric_echo", "server_comb_echo", "failing_tool");
+    });
+  }
+
+  @Test
+  void canDisableAllMcpInfrastructure() {
+    runner.withPropertyValues("opencode.mcp.enabled=false").run(context -> {
+      assertThat(context).doesNotHaveBean(McpSyncServer.class);
+      assertThat(context).doesNotHaveBean(McpToolScanner.class);
+      assertThat(context).doesNotHaveBean(McpToolRegistry.class);
+    });
+  }
+
+  @Test
+  void normalizesEndpointWithoutLeadingSlash() {
+    runner.withPropertyValues("opencode.mcp.endpoint=company-mcp").run(context -> {
+      var registration = (ServletRegistrationBean<?>) context.getBean("mcpServletRegistration");
+      assertThat(registration.getUrlMappings()).containsExactly("/company-mcp");
     });
   }
 
@@ -140,43 +160,26 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Bean
-    ApiFabricClient apiFabricClient() {
-      return new ApiFabricClient() {
-        @Override
-        public String id() {
-          return "orders";
-        }
-
-        @Override
-        public Collection<RemoteToolDefinition> tools() {
-          return List.of(remoteTool("fabric_echo", "Remote echo"));
-        }
-
-        @Override
-        public Object execute(String toolName, Map<String, Object> arguments) {
-          return "api-fabric";
-        }
-      };
+    RemoteToolClient apiFabricClient() {
+      return RemoteToolClient.of(
+          "orders",
+          ToolOrigin.Kind.API_FABRIC,
+          List.of(remoteTool("fabric_echo", "Remote echo")),
+          (toolName, arguments) -> "api-fabric");
     }
 
     @Bean
-    CseClient cseClient() {
-      return new CseClient() {
-        @Override
-        public String id() {
-          return "inventory";
-        }
+    RemoteToolClient cseClient() {
+      return RemoteToolClient.of(
+          "inventory",
+          ToolOrigin.Kind.SERVER_COMB,
+          List.of(remoteTool("server_comb_echo", "ServerComb echo")),
+          (toolName, arguments) -> "cse");
+    }
 
-        @Override
-        public Collection<RemoteToolDefinition> tools() {
-          return List.of(remoteTool("server_comb_echo", "ServerComb echo"));
-        }
-
-        @Override
-        public Object execute(String toolName, Map<String, Object> arguments) {
-          return "cse";
-        }
-      };
+    @Bean
+    FailingTools failingTools() {
+      return new FailingTools();
     }
 
     @Bean
@@ -184,8 +187,8 @@ class McpFabricAutoConfigurationTest {
       return new RecordingAuditLogger();
     }
 
-    private static RemoteToolDefinition remoteTool(String name, String description) {
-      return new RemoteToolDefinition(
+    private static RemoteToolClient.ToolDefinition remoteTool(String name, String description) {
+      return new RemoteToolClient.ToolDefinition(
           name,
           null,
           description,
@@ -209,6 +212,14 @@ class McpFabricAutoConfigurationTest {
     @Tool(name = "local_echo", description = "Echo a value", readOnly = true)
     String echo(@ToolParam(description = "Value to echo") String message) {
       return message;
+    }
+  }
+
+  static class FailingTools {
+
+    @Tool(name = "failing_tool")
+    Object fail(@ToolParam(name = "secret", required = false) String secret) {
+      throw new IllegalStateException("sensitive failure detail");
     }
   }
 }

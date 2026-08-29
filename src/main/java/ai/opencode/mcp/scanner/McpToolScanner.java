@@ -15,6 +15,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.stream.Stream;
 
 import org.springframework.aop.support.AopUtils;
@@ -45,7 +48,7 @@ public final class McpToolScanner {
     return Stream.concat(local, remote).toList();
   }
 
-  public List<ToolRegistration> scan(Object toolProvider) {
+  List<ToolRegistration> scan(Object toolProvider) {
     return annotatedMethods(AopUtils.getTargetClass(toolProvider)).stream()
         .map(method -> toRegistration(toolProvider, method))
         .toList();
@@ -91,19 +94,32 @@ public final class McpToolScanner {
 
   private Object invoke(Object target, Method method, Parameter[] parameters, Map<String, Object> arguments)
       throws Exception {
+    var safeArguments = arguments == null ? Map.<String, Object>of() : arguments;
     var values = new Object[parameters.length];
     for (var index = 0; index < parameters.length; index++) {
       var parameter = parameters[index];
       var metadata = parameter.getAnnotation(ToolParam.class);
       var name = parameterName(parameter, metadata);
-      var value = arguments.get(name);
-      if (value == null && parameter.getType() == Optional.class) {
-        values[index] = Optional.empty();
+      var present = safeArguments.containsKey(name);
+      var value = safeArguments.get(name);
+      if (!present) {
+        if (isOptional(parameter.getType())) {
+          values[index] = emptyOptional(parameter.getType());
+          continue;
+        }
+        var required = metadata == null || metadata.required();
+        if (required) throw new IllegalArgumentException("Missing required tool parameter: " + name);
+        values[index] = null;
         continue;
       }
       if (value == null) {
-        var required = metadata == null || metadata.required();
-        if (required) throw new IllegalArgumentException("Missing required tool parameter: " + name);
+        if (parameter.getType().isPrimitive()) {
+          throw new IllegalArgumentException("Primitive tool parameter cannot be null: " + name);
+        }
+        if (isOptional(parameter.getType())) {
+          values[index] = emptyOptional(parameter.getType());
+          continue;
+        }
         values[index] = null;
         continue;
       }
@@ -118,6 +134,19 @@ public final class McpToolScanner {
       if (cause instanceof Error error) throw error;
       throw exception;
     }
+  }
+
+  private static boolean isOptional(Class<?> type) {
+    return type == Optional.class || type == OptionalInt.class || type == OptionalLong.class
+        || type == OptionalDouble.class;
+  }
+
+  private static Object emptyOptional(Class<?> type) {
+    if (type == Optional.class) return Optional.empty();
+    if (type == OptionalInt.class) return OptionalInt.empty();
+    if (type == OptionalLong.class) return OptionalLong.empty();
+    if (type == OptionalDouble.class) return OptionalDouble.empty();
+    throw new IllegalArgumentException("Unsupported optional type: " + type.getName());
   }
 
   private static List<Method> annotatedMethods(Class<?> type) {

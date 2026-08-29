@@ -4,10 +4,44 @@ import ai.opencode.mcp.api.ToolOrigin;
 import ai.opencode.mcp.api.ToolHints;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 
-/** Common execution contract implemented by API Fabric and CSE/ServerComb clients. */
+/** A generic, startup-fixed source of remote MCP tools. */
 public interface RemoteToolClient {
+
+  static RemoteToolClient of(
+      String id,
+      ToolOrigin.Kind originKind,
+      Collection<ToolDefinition> tools,
+      Executor executor) {
+    if (id == null || id.isBlank()) throw new IllegalArgumentException("Remote tool client id must not be blank");
+    if (originKind == null) throw new IllegalArgumentException("Remote tool origin kind must not be null");
+    if (tools == null) throw new IllegalArgumentException("Remote tools must not be null");
+    if (executor == null) throw new IllegalArgumentException("Remote tool executor must not be null");
+    var definitions = List.copyOf(tools);
+    return new RemoteToolClient() {
+      @Override
+      public String id() {
+        return id;
+      }
+
+      @Override
+      public ToolOrigin.Kind originKind() {
+        return originKind;
+      }
+
+      @Override
+      public Collection<ToolDefinition> tools() {
+        return definitions;
+      }
+
+      @Override
+      public Object execute(String toolName, Map<String, Object> arguments) throws Exception {
+        return executor.execute(toolName, arguments);
+      }
+    };
+  }
 
   String id();
 

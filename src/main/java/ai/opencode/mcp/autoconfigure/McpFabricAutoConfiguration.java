@@ -68,7 +68,7 @@ public class McpFabricAutoConfiguration {
     return McpServer.sync(transport)
         .jsonMapper(jsonMapper)
         .serverInfo(properties.getServerName(), properties.getServerVersion())
-        .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
+        .capabilities(McpSchema.ServerCapabilities.builder().tools(false).build())
         .requestTimeout(properties.getRequestTimeout())
         .build();
   }

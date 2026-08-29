@@ -11,33 +11,57 @@ import io.modelcontextprotocol.spec.McpSchema;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 
-/** Registers normalized tools with the MCP SDK and exposes runtime registration operations. */
+/** Builds one immutable MCP tool catalog after Spring creates all singletons. */
 public final class McpToolRegistry implements SmartInitializingSingleton {
 
-  private final McpToolScanner scanner;
+  private static final Logger logger = LoggerFactory.getLogger(McpToolRegistry.class);
+
+  private final Supplier<List<ToolRegistration>> discovery;
 
   private final ObjectMapper objectMapper;
 
-  private final McpSyncServer server;
+  private final ToolServer server;
 
   private final ToolAuditLogger auditLogger;
 
-  private final Map<String, ToolRegistration> registrations = new ConcurrentHashMap<>();
+  private volatile Map<String, ToolRegistration> registrations = Map.of();
 
   public McpToolRegistry(
       McpToolScanner scanner,
       ObjectMapper objectMapper,
       McpSyncServer server,
       ToolAuditLogger auditLogger) {
-    this.scanner = scanner;
+    this(scanner::scan, objectMapper, new ToolServer() {
+      @Override
+      public void add(McpServerFeatures.SyncToolSpecification specification) {
+        server.addTool(specification);
+      }
+
+      @Override
+      public void remove(String name) {
+        server.removeTool(name);
+      }
+    }, auditLogger);
+  }
+
+  McpToolRegistry(
+      Supplier<List<ToolRegistration>> discovery,
+      ObjectMapper objectMapper,
+      ToolServer server,
+      ToolAuditLogger auditLogger) {
+    this.discovery = discovery;
     this.objectMapper = objectMapper;
     this.server = server;
     this.auditLogger = auditLogger;
@@ -45,49 +69,44 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
 
   @Override
   public void afterSingletonsInstantiated() {
-    scanner.scan().forEach(this::register);
-  }
-
-  public void register(Object toolProvider) {
-    scanner.scan(toolProvider).forEach(this::register);
-  }
-
-  public void register(ToolRegistration registration) {
-    var started = System.nanoTime();
-    var audited = registration.withInvoker(arguments -> invoke(registration, arguments));
-    var existing = registrations.putIfAbsent(audited.name(), audited);
-    if (existing != null) {
-      var exception = new IllegalStateException("Duplicate MCP tool name: " + audited.name());
-      audit(audited, ToolAuditEvent.Operation.REGISTER, started, null, null, exception);
-      throw exception;
-    }
-
+    var discovered = normalize(discovery.get());
+    var added = new ArrayList<ToolRegistration>();
     try {
-      server.addTool(toSpecification(audited));
-      audit(audited, ToolAuditEvent.Operation.REGISTER, started, null, null, null);
+      for (var registration : discovered.values()) {
+        var started = System.nanoTime();
+        server.add(toSpecification(registration));
+        added.add(registration);
+        audit(registration, ToolAuditEvent.Operation.REGISTER, started, null, null, null);
+      }
+      registrations = Collections.unmodifiableMap(discovered);
     } catch (RuntimeException exception) {
-      registrations.remove(audited.name(), audited);
-      audit(audited, ToolAuditEvent.Operation.REGISTER, started, null, null, exception);
-      throw exception;
-    }
-  }
-
-  public void remove(String name) {
-    var registration = registrations.remove(name);
-    if (registration == null) return;
-    var started = System.nanoTime();
-    try {
-      server.removeTool(name);
-      audit(registration, ToolAuditEvent.Operation.REMOVE, started, null, null, null);
-    } catch (RuntimeException exception) {
-      registrations.putIfAbsent(name, registration);
-      audit(registration, ToolAuditEvent.Operation.REMOVE, started, null, null, exception);
+      rollback(added);
       throw exception;
     }
   }
 
   public Collection<ToolRegistration> tools() {
-    return Collections.unmodifiableCollection(registrations.values());
+    return registrations.values();
+  }
+
+  private Map<String, ToolRegistration> normalize(List<ToolRegistration> discovered) {
+    var normalized = new LinkedHashMap<String, ToolRegistration>();
+    for (var registration : discovered) {
+      var audited = registration.withInvoker(arguments -> invoke(registration, arguments));
+      var existing = normalized.putIfAbsent(audited.name(), audited);
+      if (existing != null) throw new IllegalStateException("Duplicate MCP tool name: " + audited.name());
+    }
+    return normalized;
+  }
+
+  private void rollback(List<ToolRegistration> added) {
+    for (var index = added.size() - 1; index >= 0; index--) {
+      try {
+        server.remove(added.get(index).name());
+      } catch (RuntimeException rollbackFailure) {
+        logger.warn("Failed to roll back MCP tool registration tool={}", added.get(index).name(), rollbackFailure);
+      }
+    }
   }
 
   private Object invoke(ToolRegistration registration, Map<String, Object> arguments) throws Exception {
@@ -102,7 +121,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
     }
   }
 
-  private McpServerFeatures.SyncToolSpecification toSpecification(ToolRegistration registration) {
+  McpServerFeatures.SyncToolSpecification toSpecification(ToolRegistration registration) {
     var hints = registration.hints();
     var annotations = McpSchema.ToolAnnotations.builder()
         .title(registration.title())
@@ -122,7 +141,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
         .build();
   }
 
-  private McpSchema.CallToolResult call(ToolRegistration registration, Map<String, Object> arguments) {
+  McpSchema.CallToolResult call(ToolRegistration registration, Map<String, Object> arguments) {
     try {
       var result = registration.invoker().invoke(arguments == null ? Map.of() : arguments);
       if (result instanceof McpSchema.CallToolResult callToolResult) return callToolResult;
@@ -146,7 +165,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
       Map<String, Object> arguments,
       Object result,
       Exception exception) {
-    auditLogger.record(new ToolAuditEvent(
+    var event = new ToolAuditEvent(
         Instant.now(),
         operation,
         exception == null ? ToolAuditEvent.Outcome.SUCCESS : ToolAuditEvent.Outcome.FAILURE,
@@ -155,11 +174,22 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
         Duration.ofNanos(System.nanoTime() - started),
         arguments,
         result,
-        exception == null ? null : exception.getClass().getName()));
+        exception == null ? null : exception.getClass().getName());
+    try {
+      auditLogger.record(event);
+    } catch (RuntimeException auditFailure) {
+      logger.warn("Failed to record MCP tool audit operation={} tool={}", operation, registration.name(), auditFailure);
+    }
   }
 
   private static String errorMessage(Exception exception) {
     var message = exception.getMessage();
     return message == null || message.isBlank() ? exception.getClass().getSimpleName() : message;
+  }
+
+  interface ToolServer {
+    void add(McpServerFeatures.SyncToolSpecification specification);
+
+    void remove(String name);
   }
 }
