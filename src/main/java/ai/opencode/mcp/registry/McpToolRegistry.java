@@ -21,14 +21,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 
-/** Builds one immutable MCP tool catalog after Spring creates all singletons. */
+/** 在 Spring 创建全部单例后构建不可变的 MCP 工具目录。 */
+@Slf4j
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 public final class McpToolRegistry implements SmartInitializingSingleton {
-
-  private static final Logger logger = LoggerFactory.getLogger(McpToolRegistry.class);
 
   private final Supplier<List<ToolRegistration>> discovery;
 
@@ -56,17 +57,6 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
         server.removeTool(name);
       }
     }, auditLogger);
-  }
-
-  McpToolRegistry(
-      Supplier<List<ToolRegistration>> discovery,
-      ObjectMapper objectMapper,
-      ToolServer server,
-      ToolAuditLogger auditLogger) {
-    this.discovery = discovery;
-    this.objectMapper = objectMapper;
-    this.server = server;
-    this.auditLogger = auditLogger;
   }
 
   @Override
@@ -116,7 +106,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
       try {
         server.remove(added.get(index).name());
       } catch (RuntimeException rollbackFailure) {
-        logger.warn("Failed to roll back MCP tool registration tool={}", added.get(index).name(), rollbackFailure);
+        log.warn("Failed to roll back MCP tool registration tool={}", added.get(index).name(), rollbackFailure);
       }
     }
   }
@@ -205,7 +195,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
     try {
       auditLogger.record(event);
     } catch (RuntimeException auditFailure) {
-      logger.warn("Failed to record MCP tool audit operation={} tool={}", operation, registration.name(), auditFailure);
+      log.warn("Failed to record MCP tool audit operation={} tool={}", operation, registration.name(), auditFailure);
     }
   }
 

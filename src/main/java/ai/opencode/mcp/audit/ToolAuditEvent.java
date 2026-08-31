@@ -8,7 +8,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** A complete MCP tool audit event, including invocation arguments and result. */
+/** 完整的 MCP 工具审计事件，包含调用参数和结果。 */
 public record ToolAuditEvent(
     Instant timestamp,
     Operation operation,

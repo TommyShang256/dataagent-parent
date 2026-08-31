@@ -1,6 +1,6 @@
 package ai.opencode.mcp.api;
 
-/** Identifies where a normalized tool came from for routing and operations. */
+/** 标识标准化工具的来源，供路由和运维使用。 */
 public record ToolOrigin(Kind kind, String sourceId) {
 
   public ToolOrigin {

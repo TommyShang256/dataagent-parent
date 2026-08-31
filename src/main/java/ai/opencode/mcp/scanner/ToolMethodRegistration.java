@@ -3,5 +3,5 @@ package ai.opencode.mcp.scanner;
 import ai.opencode.mcp.api.ToolRegistration;
 import java.lang.reflect.Method;
 
-/** Annotation method metadata retained until endpoint binding completes. */
+/** 保留到端点绑定完成的注解方法元数据。 */
 public record ToolMethodRegistration(Method method, ToolRegistration registration) {}

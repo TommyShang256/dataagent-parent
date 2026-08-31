@@ -7,7 +7,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-/** A generic, startup-fixed source of remote MCP tools. */
+/** 启动期固定的通用远程 MCP 工具来源。 */
 public interface RemoteToolClient {
 
   static RemoteToolClient of(

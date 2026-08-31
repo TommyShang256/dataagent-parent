@@ -45,7 +45,7 @@ class McpFabricAutoConfigurationTest {
       assertThat(context).hasSingleBean(McpToolRegistry.class);
       assertThat(context.getBeansOfType(RemoteToolClient.class)).hasSize(2);
       var servletRegistration = (ServletRegistrationBean<?>) context.getBean("mcpServletRegistration");
-      assertThat(servletRegistration.getUrlMappings()).containsExactly("/mcp");
+      assertThat(servletRegistration.getUrlMappings()).containsExactly("/rest/mcp");
       var tools = context.getBean(McpToolRegistry.class).tools();
       assertThat(tools).extracting(ToolRegistration::name)
           .containsExactlyInAnyOrder("local_echo", "fabric_echo", "server_comb_echo", "failing_tool");

@@ -3,7 +3,7 @@ package ai.opencode.mcp.scanner;
 import ai.opencode.mcp.api.ToolRegistration;
 import java.util.List;
 
-/** Compiles annotation method registrations into final startup registrations. */
+/** 将注解方法注册编译为最终的启动期注册。 */
 @FunctionalInterface
 public interface ToolEndpointBinder {
 

@@ -26,7 +26,7 @@ import org.springframework.core.MethodIntrospector;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.util.ReflectionUtils;
 
-/** Discovers local annotated methods and remote tool clients as normalized registrations. */
+/** 发现本地注解方法和远程工具客户端，并生成标准化注册。 */
 public final class McpToolScanner {
 
   private final ConfigurableListableBeanFactory beanFactory;

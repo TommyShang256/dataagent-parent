@@ -9,6 +9,7 @@
 - Java 21
 - Spring Boot 3.4.13
 - MCP Java SDK 2.0.1
+- Lombok 1.18.40
 - Spring MVC/Tomcat 服务端
 - Spring WebFlux `WebClient` 下游客户端
 
@@ -48,7 +49,7 @@ public class OrderTools {
 opencode:
   mcp:
     enabled: true
-    endpoint: /mcp
+    endpoint: /rest/mcp
     server-name: dataagent-mcp
     server-version: 0.1.0
     request-timeout: 5m
@@ -141,4 +142,4 @@ Content-Type 和 boundary、单文件及总大小限制、流式传输、取消�
 mvn clean verify
 ```
 
-默认 MCP 地址为 `http://localhost:8080/mcp`。
+默认 MCP 地址为 `http://localhost:8080/rest/mcp`。

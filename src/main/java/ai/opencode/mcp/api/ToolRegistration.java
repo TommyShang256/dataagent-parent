@@ -2,7 +2,7 @@ package ai.opencode.mcp.api;
 
 import java.util.Map;
 
-/** Normalized startup tool definition shared by local scanning and remote discovery. */
+/** 本地扫描与远程发现共用的标准化启动期工具定义。 */
 public record ToolRegistration(
     String name,
     String title,

@@ -27,13 +27,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import lombok.RequiredArgsConstructor;
+
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
-/** Validates and binds configured API Fabric/CSE endpoints before tools are published. */
+/** 在工具发布前校验并绑定配置的 API Fabric/CSE 端点。 */
+@RequiredArgsConstructor
 public final class RemoteToolEndpointBinder implements ToolEndpointBinder {
 
   private static final Pattern PLACEHOLDER = Pattern.compile("\\{([^{}]+)}");
@@ -41,13 +44,6 @@ public final class RemoteToolEndpointBinder implements ToolEndpointBinder {
   private final McpFabricProperties properties;
   private final ObjectMapper objectMapper;
   private final RemoteToolWebClientProvider clients;
-
-  public RemoteToolEndpointBinder(
-      McpFabricProperties properties, ObjectMapper objectMapper, RemoteToolWebClientProvider clients) {
-    this.properties = properties;
-    this.objectMapper = objectMapper;
-    this.clients = clients;
-  }
 
   @Override
   public List<ToolRegistration> bind(List<ToolMethodRegistration> methods) {

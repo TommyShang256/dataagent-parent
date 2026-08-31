@@ -50,15 +50,15 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 final class McpJsonSchemaGenerator {
 
   private static final String DIALECT = "https://json-schema.org/draft/2020-12/schema";
 
   private final ObjectMapper objectMapper;
-
-  McpJsonSchemaGenerator(ObjectMapper objectMapper) {
-    this.objectMapper = objectMapper;
-  }
 
   Map<String, Object> forMethod(java.lang.reflect.Method method) {
     var context = new SchemaContext(method);
@@ -88,6 +88,7 @@ final class McpJsonSchemaGenerator {
     return root;
   }
 
+  @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
   private final class SchemaContext {
 
     private final java.lang.reflect.Method method;
@@ -97,10 +98,6 @@ final class McpJsonSchemaGenerator {
     private final Map<String, String> definitionNames = new HashMap<>();
 
     private final Map<String, String> definitionTypes = new HashMap<>();
-
-    private SchemaContext(java.lang.reflect.Method method) {
-      this.method = method;
-    }
 
     private Map<String, Object> valueSchema(JavaType type, String path, Nulls valueNulls) {
       var schema = schema(type, path);

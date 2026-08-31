@@ -1,14 +1,12 @@
 package ai.opencode.mcp.audit;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
-/** Writes complete MCP tool audit events as SLF4J parameterized logs. */
+/** 使用 SLF4J 参数化日志记录完整的 MCP 工具审计事件。 */
+@Slf4j(topic = "ai.opencode.mcp.audit.tool")
 public final class Slf4jToolAuditLogger implements ToolAuditLogger {
 
   public static final String LOGGER_NAME = "ai.opencode.mcp.audit.tool";
-
-  private final Logger logger = LoggerFactory.getLogger(LOGGER_NAME);
 
   @Override
   public void record(ToolAuditEvent event) {
@@ -26,9 +24,9 @@ public final class Slf4jToolAuditLogger implements ToolAuditLogger {
       event.errorType()
     };
     if (event.outcome() == ToolAuditEvent.Outcome.SUCCESS) {
-      logger.info(message, arguments);
+      log.info(message, arguments);
       return;
     }
-    logger.warn(message, arguments);
+    log.warn(message, arguments);
   }
 }

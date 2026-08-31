@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 
-/** Extracts safe request headers without retaining servlet request state. */
+/** 提取安全的请求 Header，且不保留 Servlet 请求状态。 */
 public final class ServletToolContextExtractor implements McpTransportContextExtractor<HttpServletRequest> {
 
   @Override
