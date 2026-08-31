@@ -117,6 +117,16 @@ Servlet transport 安装 `McpTransportContextExtractor<HttpServletRequest>`。�
 
 备选方案：在 `@Tool` 上公开 `type` 属性。不采用，因为同一个注解工具是否远程及远程类别由配置绑定结果决定，手工属性会形成第二个不一致的事实来源。
 
+### 5.2 工具行为属性直接进入注册模型
+
+工具只通过 `@Tool` 声明后，`ToolHints` 不再承担跨来源标准化职责，只把 `readOnly`、`destructive`、
+`idempotent` 和 `openWorld` 四个布尔值从注解复制到 `ToolRegistration`，随后由 registry 再逐项读取生成
+SDK `ToolAnnotations`。该 record 没有校验、计算或独立扩展策略，因此删除 `ToolHints`，由 scanner 将注解值
+直接写入 `ToolRegistration`，registry 直接读取四个字段。
+
+不在 `ToolRegistration` 中保存 `Tool` 注解实例。注解是扫描输入，且空工具名仍需结合 Java 方法名解析；运行期
+注册模型只保存解析后的稳定值。远程端点绑定只替换 invoker 和最终类型，复制注册信息时完整保留四个行为属性。
+
 ### 6. API Fabric 和 CSE 共用一条 WebClient 请求管线
 
 增加 Spring WebFlux 客户端库，但不改变 Servlet Server 技术栈。统一的请求构建器应用参数映射，并通过 `WebClient` 发起同步调用，因为当前 MCP Server 是同步模式。

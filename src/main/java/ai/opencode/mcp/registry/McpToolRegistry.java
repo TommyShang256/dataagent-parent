@@ -1,6 +1,5 @@
 package ai.opencode.mcp.registry;
 
-import ai.opencode.mcp.api.ToolHints;
 import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
@@ -180,13 +179,12 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
   }
 
   McpServerFeatures.SyncToolSpecification toSpecification(ToolRegistration registration) {
-    ToolHints hints = registration.hints();
     McpSchema.ToolAnnotations annotations = McpSchema.ToolAnnotations.builder()
         .title(registration.title())
-        .readOnlyHint(hints.readOnly())
-        .destructiveHint(hints.destructive())
-        .idempotentHint(hints.idempotent())
-        .openWorldHint(hints.openWorld())
+        .readOnlyHint(registration.readOnly())
+        .destructiveHint(registration.destructive())
+        .idempotentHint(registration.idempotent())
+        .openWorldHint(registration.openWorld())
         .build();
     McpSchema.Tool tool = McpSchema.Tool.builder(registration.name(), registration.inputSchema())
         .title(registration.title())

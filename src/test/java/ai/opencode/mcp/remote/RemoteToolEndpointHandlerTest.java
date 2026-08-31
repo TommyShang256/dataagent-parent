@@ -48,6 +48,10 @@ class RemoteToolEndpointHandlerTest {
 
     var remote = tools.stream().filter(tool -> tool.name().equals("create_order")).findFirst().orElseThrow();
     assertThat(remote.type()).isEqualTo(Tool.Type.API_FABRIC);
+    assertThat(remote.readOnly()).isTrue();
+    assertThat(remote.destructive()).isFalse();
+    assertThat(remote.idempotent()).isTrue();
+    assertThat(remote.openWorld()).isFalse();
     Map<String, List<String>> headers = Map.of(
         "Authorization", List.of("Bearer one", "Bearer two"),
         "x-biz-mode", List.of("inbound"),
@@ -264,7 +268,12 @@ class RemoteToolEndpointHandlerTest {
   record OrderResponse(String id, String status) {}
 
   static class ProxyTools {
-    @Tool(name = "create_order")
+    @Tool(
+        name = "create_order",
+        readOnly = true,
+        destructive = false,
+        idempotent = true,
+        openWorld = false)
     OrderResponse create(
         String tenantId, List<String> tags, String bizMode,
         @ToolParam(required = false) String customerId,

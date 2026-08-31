@@ -12,8 +12,11 @@ import java.util.Map;
  * @param description 工具说明
  * @param inputSchema 工具输入 JSON Schema
  * @param invoker 工具调用器
- * @param hints 工具行为提示
  * @param type 启动绑定完成后的工具执行类别
+ * @param readOnly 工具是否只读
+ * @param destructive 工具是否可能产生破坏性变更
+ * @param idempotent 工具是否幂等
+ * @param openWorld 工具是否可能访问外部实体
  * @author beining.shang
  * @since 2026-08-31
  */
@@ -23,8 +26,11 @@ public record ToolRegistration(
     String description,
     Map<String, Object> inputSchema,
     ToolInvoker invoker,
-    ToolHints hints,
-    Tool.Type type) {
+    Tool.Type type,
+    boolean readOnly,
+    boolean destructive,
+    boolean idempotent,
+    boolean openWorld) {
 
   /**
    * 创建并校验完整工具注册信息。
@@ -34,8 +40,11 @@ public record ToolRegistration(
    * @param description 工具说明
    * @param inputSchema 工具输入 JSON Schema，不能为 {@code null}
    * @param invoker 工具调用器，不能为 {@code null}
-   * @param hints 工具行为提示；为 {@code null} 时使用默认值
    * @param type 启动绑定完成后的工具执行类别，不能为 {@code null}
+   * @param readOnly 工具是否只读
+   * @param destructive 工具是否可能产生破坏性变更
+   * @param idempotent 工具是否幂等
+   * @param openWorld 工具是否可能访问外部实体
    */
   public ToolRegistration {
     if (name == null || name.isBlank()) {
@@ -47,7 +56,6 @@ public record ToolRegistration(
     if (invoker == null) {
       throw new IllegalArgumentException("Tool invoker must not be null");
     }
-    hints = hints == null ? ToolHints.DEFAULT : hints;
     if (type == null) {
       throw new IllegalArgumentException("Tool type must not be null");
     }
@@ -60,7 +68,9 @@ public record ToolRegistration(
    * @return 使用新执行类别的工具注册信息
    */
   public ToolRegistration withType(Tool.Type value) {
-    return new ToolRegistration(name, title, description, inputSchema, invoker, hints, value);
+    return new ToolRegistration(
+        name, title, description, inputSchema, invoker, value,
+        readOnly, destructive, idempotent, openWorld);
   }
 
   /**
@@ -70,6 +80,8 @@ public record ToolRegistration(
    * @return 使用新调用器的工具注册信息
    */
   public ToolRegistration withInvoker(ToolInvoker value) {
-    return new ToolRegistration(name, title, description, inputSchema, value, hints, type);
+    return new ToolRegistration(
+        name, title, description, inputSchema, value, type,
+        readOnly, destructive, idempotent, openWorld);
   }
 }

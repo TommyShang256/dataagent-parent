@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.opencode.mcp.annotation.Tool;
-import ai.opencode.mcp.api.ToolHints;
 import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
@@ -118,14 +117,30 @@ class McpToolRegistryTest {
 
   @Test
   void generatedSpecificationInvokesMcpHandler() {
-    var registry = registry(List.of(), new FakeToolServer(), event -> {});
-    var specification = registry.toSpecification(registration("echo", arguments -> arguments.get("message")));
-    var result = specification.callHandler().apply(
+    McpToolRegistry registry = registry(List.of(), new FakeToolServer(), event -> {});
+    ToolRegistration registration = new ToolRegistration(
+        "echo",
+        "回显",
+        null,
+        Map.of("type", "object", "additionalProperties", false),
+        arguments -> arguments.get("message"),
+        Tool.Type.LOCAL,
+        true,
+        false,
+        true,
+        false);
+    McpServerFeatures.SyncToolSpecification specification = registry.toSpecification(registration);
+    McpSchema.CallToolResult result = specification.callHandler().apply(
         null, McpSchema.CallToolRequest.builder("echo")
             .arguments(Map.of("message", "through-handler"))
             .build());
 
     assertThat(specification.tool().name()).isEqualTo("echo");
+    assertThat(specification.tool().annotations().title()).isEqualTo("回显");
+    assertThat(specification.tool().annotations().readOnlyHint()).isTrue();
+    assertThat(specification.tool().annotations().destructiveHint()).isFalse();
+    assertThat(specification.tool().annotations().idempotentHint()).isTrue();
+    assertThat(specification.tool().annotations().openWorldHint()).isFalse();
     assertText(result, "through-handler", false);
   }
 
@@ -190,8 +205,11 @@ class McpToolRegistryTest {
         null,
         Map.of("type", "object", "additionalProperties", false),
         invoker,
-        ToolHints.DEFAULT,
-        Tool.Type.LOCAL);
+        Tool.Type.LOCAL,
+        false,
+        true,
+        false,
+        true);
   }
 
   private static void assertText(McpSchema.CallToolResult result, String text, boolean error) {

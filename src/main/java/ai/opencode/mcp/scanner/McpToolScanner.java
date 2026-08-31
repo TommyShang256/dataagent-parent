@@ -2,7 +2,6 @@ package ai.opencode.mcp.scanner;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.annotation.ToolParam;
-import ai.opencode.mcp.api.ToolHints;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -156,16 +155,17 @@ public final class McpToolScanner {
     String name = annotation.name().isBlank() ? method.getName() : annotation.name();
     String title = annotation.title().isBlank() ? null : annotation.title();
     String description = annotation.description().isBlank() ? null : annotation.description();
-    ToolHints hints = new ToolHints(
-        annotation.readOnly(), annotation.destructive(), annotation.idempotent(), annotation.openWorld());
     return new ToolRegistration(
         name,
         title,
         description,
         schemaGenerator.forMethod(method),
         arguments -> invoke(target, invocable, method.getParameters(), arguments),
-        hints,
-        Tool.Type.LOCAL);
+        Tool.Type.LOCAL,
+        annotation.readOnly(),
+        annotation.destructive(),
+        annotation.idempotent(),
+        annotation.openWorld());
   }
 
   private Object invoke(Object target, Method method, Parameter[] parameters, Map<String, Object> arguments)

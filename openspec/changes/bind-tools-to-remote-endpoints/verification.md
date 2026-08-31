@@ -43,10 +43,11 @@
 默认实现同时存在；`applicationCanAddAnotherEndpointHandler` 验证扩展实现会加入 scanner 的端点绑定；
 `McpToolScannerEndpointHandlerTest` 同时覆盖本地 fallback、未知 ref 和跨实现重复 ref。
 
-结构精简检查：全部重构使生产 Java 源文件从 26 个减少到 20 个，编译后类声明从 44 个减少到 34 个。
-本轮使用同一 Git 暂存快照和相同 `javap -p` 规则复算，源文件从 22 个减少到 20 个、编译类从 36 个减少到
-34 个、已声明构造器和方法从 237 个减少到 225 个。计数包含 Lombok 生成方法，因而反映实际字节码 API 与
-内部成员的变化。
+结构精简检查：全部重构使生产 Java 源文件从 26 个减少到 19 个，编译后类声明从 44 个减少到 33 个。
+来源与上下文内联阶段使用同一 Git 暂存快照和相同 `javap -p` 规则复算，源文件从 22 个减少到 20 个、编译类
+从 36 个减少到 34 个、已声明构造器和方法从 237 个减少到 225 个。本轮行为属性内联继续使源文件从 20 个
+减少到 19 个、编译类从 34 个减少到 33 个、构造器和方法从 225 个减少到 220 个。计数包含 Lombok 生成方法，
+因而反映实际字节码 API 与内部成员的变化。
 
 工具声明路径检查：已删除 `RemoteToolClient` 及 scanner 中的编程式工具注册分支。
 `McpFabricAutoConfigurationTest.registersAnnotatedTools` 和 `invokesAnnotatedToolsAndAuditsOperations`
@@ -59,6 +60,11 @@
 直接接收不可变多值 Header 映射；starter registry 测试和消费端完整请求测试验证 Header 透传、审计隔离及
 请求间隔离行为不变。
 
-其余生产类型也已逐项审计：`ToolHints` 同时承载四个独立 MCP 行为语义；`ServletToolContextExtractor` 必须实现
-SDK transport SPI；`RemoteHeaderPolicy` 被提取器与远程请求管线共同使用；`RemoteToolInvocationFactory` 负责
-API Fabric/CSE 共享的请求编译和执行。它们均具有独立职责，不是可以无损内联的单字段或纯转发包装。
+其余生产类型也已逐项审计：`ServletToolContextExtractor` 必须实现 SDK transport SPI；`RemoteHeaderPolicy`
+被提取器与远程请求管线共同使用；`RemoteToolInvocationFactory` 负责 API Fabric/CSE 共享的请求编译和执行。
+它们均具有独立职责，不是可以无损内联的单字段或纯转发包装。
+
+工具行为属性内联检查：`ToolHints` 已删除，scanner 将 `@Tool.readOnly`、`destructive`、`idempotent` 和
+`openWorld` 直接写入 `ToolRegistration`。`McpToolRegistryTest.generatedSpecificationInvokesMcpHandler` 验证四个
+值原样生成 SDK `ToolAnnotations`；`RemoteToolEndpointHandlerTest.bindsFabricRequestWithAutomaticPathBodyQueryAndHeaderRules`
+验证远程 invoker 与类型替换后四个值仍完整保留。

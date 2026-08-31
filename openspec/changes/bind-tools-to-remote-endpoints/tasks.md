@@ -60,3 +60,8 @@
 - [x] 9.1 在 `Tool` 内声明最终工具类型枚举，以类型字段替代 `ToolOrigin`，同步 scanner、端点处理器、WebClient provider、审计事件和测试，并删除重复的来源标识
 - [x] 9.2 将只承载请求 Header 的 `ToolInvocationContext` 内联为不可变多值 Header 映射，保持函数式 `ToolInvoker`、审计包装、Header 透传和请求隔离行为，并删除独立上下文类型
 - [x] 9.3 更新 README、设计和验证材料，执行 starter 与消费端全量测试、JavaDoc、严格 OpenSpec 校验、结构计数和 Git 暂存检查
+
+## 10. 工具行为属性内联
+
+- [x] 10.1 删除 `ToolHints`，将四个 `@Tool` 行为属性直接保存到 `ToolRegistration`，同步 scanner、registry 和测试，并确认本地与远程绑定完整保留 SDK ToolAnnotations
+- [x] 10.2 更新设计与验证材料，执行 starter、消费端、JavaDoc、严格 OpenSpec、结构计数和 Git 暂存检查
