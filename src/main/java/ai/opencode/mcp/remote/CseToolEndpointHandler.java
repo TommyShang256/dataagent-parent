@@ -22,7 +22,7 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
   public static final String BEAN_NAME = "cseToolEndpointHandler";
 
   private final McpFabricProperties.Cse properties;
-  private final RemoteToolInvocationFactory invocationFactory;
+  private final RemoteToolBindingFactory bindingFactory;
 
   /**
    * 创建 CSE 端点处理器。
@@ -36,7 +36,7 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
       ObjectMapper objectMapper,
       RemoteToolWebClientProvider clients) {
     this.properties = properties.getCse();
-    this.invocationFactory = new RemoteToolInvocationFactory(
+    this.bindingFactory = new RemoteToolBindingFactory(
         objectMapper, clients, properties.getRequestTimeout());
   }
 
@@ -74,7 +74,7 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
     if (endpoint == null) {
       throw new IllegalArgumentException("CSE 端点 ref=" + reference + ": 未配置该引用");
     }
-    return invocationFactory.bind(
+    return bindingFactory.bind(
         endpointType(), method, registration, endpoint, endpoint.getUriTemplate(),
         Tool.Type.CSE);
   }

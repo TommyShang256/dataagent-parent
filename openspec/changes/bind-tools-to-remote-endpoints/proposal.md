@@ -17,6 +17,7 @@
 - 删除没有实际消费场景的 `RemoteToolClient` 编程式注册路径，工具统一由 `@Tool` 声明。
 - 将最终绑定类型收敛为 `Tool.Type`，删除同时保存重复来源标识的 `ToolOrigin`；将只包装请求 Header 的 `ToolInvocationContext` 内联为不可变多值 Header 映射。
 - 将只复制 `@Tool` 四个行为属性的 `ToolHints` 内联到 `ToolRegistration`，减少重复模型和对象转换。
+- 合并 Servlet Header 提取与远程 Header 策略，收敛共享绑定工厂的命名和内部实现，同时保持 API Fabric/CSE handler 与 WebClient provider 两层扩展边界不变。
 - 将 multipart 文件上传记录为后续待办；本次变更只支持 JSON 请求体。
 
 ## Capabilities

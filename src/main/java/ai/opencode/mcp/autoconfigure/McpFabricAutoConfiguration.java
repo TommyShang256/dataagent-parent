@@ -7,7 +7,7 @@ import ai.opencode.mcp.remote.ApiFabricToolEndpointHandler;
 import ai.opencode.mcp.remote.CseToolEndpointHandler;
 import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
-import ai.opencode.mcp.remote.ServletToolContextExtractor;
+import ai.opencode.mcp.remote.RemoteRequestHeaders;
 import ai.opencode.mcp.scanner.McpToolScanner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -57,7 +57,7 @@ public class McpFabricAutoConfiguration {
         HttpServletStreamableServerTransportProvider.builder()
         .jsonMapper(jsonMapper)
         .mcpEndpoint(normalizeEndpoint(properties.getEndpoint()))
-        .contextExtractor(new ServletToolContextExtractor())
+        .contextExtractor(new RemoteRequestHeaders())
         .maxRequestSize(Math.toIntExact(properties.getMaxRequestSize().toBytes()));
     if (properties.getKeepAlive() != null) {
       builder.keepAliveInterval(properties.getKeepAlive());

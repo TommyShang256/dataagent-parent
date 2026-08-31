@@ -4,7 +4,7 @@ import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
-import ai.opencode.mcp.remote.ServletToolContextExtractor;
+import ai.opencode.mcp.remote.RemoteRequestHeaders;
 import ai.opencode.mcp.scanner.McpToolScanner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.server.McpServerFeatures;
@@ -229,7 +229,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
     if (transportContext == null) {
       return Map.of();
     }
-    Object value = transportContext.get(ServletToolContextExtractor.class.getName());
+    Object value = transportContext.get(RemoteRequestHeaders.class.getName());
     if (!(value instanceof Map<?, ?> map)) {
       return Map.of();
     }

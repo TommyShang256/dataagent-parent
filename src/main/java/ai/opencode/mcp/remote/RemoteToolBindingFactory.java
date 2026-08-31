@@ -1,7 +1,7 @@
 package ai.opencode.mcp.remote;
 
-import ai.opencode.mcp.annotation.ToolParam;
 import ai.opencode.mcp.annotation.Tool;
+import ai.opencode.mcp.annotation.ToolParam;
 import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.autoconfigure.McpFabricProperties;
@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.http.HttpMethod;
@@ -42,9 +43,11 @@ import org.springframework.web.util.UriBuilder;
  * @since 2026-08-31
  */
 @RequiredArgsConstructor
-final class RemoteToolInvocationFactory {
+final class RemoteToolBindingFactory {
 
   private static final Pattern PLACEHOLDER = Pattern.compile("\\{([^{}]+)}");
+  private static final Set<String> SUPPORTED_METHODS = Set.of(
+      "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE");
 
   private final ObjectMapper objectMapper;
   private final RemoteToolWebClientProvider clients;
@@ -72,14 +75,21 @@ final class RemoteToolInvocationFactory {
         .filter(name -> !consumed.contains(name))
         .toList();
     JavaType returnType = objectMapper.constructType(toolMethod.getGenericReturnType());
+    Map<String, String> businessHeaders = Map.copyOf(endpoint.getHeaders().getBusiness());
+    Set<String> normalizedBusinessHeaderNames = new HashSet<>();
+    for (String name : businessHeaders.keySet()) {
+      normalizedBusinessHeaderNames.add(name.toLowerCase(Locale.ROOT));
+    }
+    Set<String> businessHeaderNames = Set.copyOf(normalizedBusinessHeaderNames);
     ToolInvoker invocation = new RemoteToolInvocation(
         reference,
         uriTemplate,
         method,
         type,
-        path,
+        Set.copyOf(path),
         Map.copyOf(endpoint.getQuery()),
-        Map.copyOf(endpoint.getHeaders().getBusiness()),
+        businessHeaders,
+        businessHeaderNames,
         bodyFields,
         returnType);
     return registration.withInvoker(invocation).withType(type);
@@ -96,18 +106,18 @@ final class RemoteToolInvocationFactory {
     Set<String> querySources = new HashSet<>(endpoint.getQuery().values());
     for (String source : querySources) {
       if (path.contains(source)) {
-        fail(category, reference, "参数 " + source + " 同时用于 Path 和 Query");
+        throw failure(category, reference, "参数 " + source + " 同时用于 Path 和 Query");
       }
     }
     for (Map.Entry<String, String> item : endpoint.getHeaders().getBusiness().entrySet()) {
-      if (RemoteHeaderPolicy.isExcluded(item.getKey())) {
-        fail(category, reference, "业务 Header " + item.getKey() + " 是系统排除名称");
+      if (RemoteRequestHeaders.isExcluded(item.getKey())) {
+        throw failure(category, reference, "业务 Header " + item.getKey() + " 是系统排除名称");
       }
       if (path.contains(item.getValue())) {
-        fail(category, reference, "参数 " + item.getValue() + " 同时用于 Path 和业务 Header");
+        throw failure(category, reference, "参数 " + item.getValue() + " 同时用于 Path 和业务 Header");
       }
       if (querySources.contains(item.getValue())) {
-        fail(category, reference, "参数 " + item.getValue() + " 同时用于 Query 和业务 Header");
+        throw failure(category, reference, "参数 " + item.getValue() + " 同时用于 Query 和业务 Header");
       }
     }
   }
@@ -123,7 +133,7 @@ final class RemoteToolInvocationFactory {
       String downstreamName = item.getKey();
       if (!StringUtils.hasText(downstreamName)
           || !downstream.add(downstreamName.toLowerCase(Locale.ROOT))) {
-        fail(category, reference, location + " 下游名称重复或为空: " + downstreamName);
+        throw failure(category, reference, location + " 下游名称重复或为空: " + downstreamName);
       }
       requireParameter(category, reference, parameters, item.getValue(), location);
     }
@@ -136,7 +146,7 @@ final class RemoteToolInvocationFactory {
       String source,
       String location) {
     if (!StringUtils.hasText(source) || !parameters.contains(source)) {
-      fail(category, reference, location + " 引用未知工具参数: " + source);
+      throw failure(category, reference, location + " 引用未知工具参数: " + source);
     }
   }
 
@@ -146,39 +156,32 @@ final class RemoteToolInvocationFactory {
       String template,
       Tool.Type type) {
     if (!StringUtils.hasText(template)) {
-      fail(category, reference, "URI template 不能为空");
+      throw failure(category, reference, "URI template 不能为空");
     }
     try {
       String probe = PLACEHOLDER.matcher(template).replaceAll("value");
       URI uri = URI.create(probe);
       if (!uri.isAbsolute()) {
-        fail(category, reference, "URI template 必须生成绝对 URI");
+        throw failure(category, reference, "URI template 必须生成绝对 URI");
       }
       if (type == Tool.Type.CSE
           && (!"cse".equalsIgnoreCase(uri.getScheme()) || !StringUtils.hasText(uri.getAuthority()))) {
-        fail(category, reference, "CSE URI 必须使用 cse://service-name/... 格式");
+        throw failure(category, reference, "CSE URI 必须使用 cse://service-name/... 格式");
       }
     } catch (IllegalArgumentException exception) {
-      fail(category, reference, "非法 URI template: " + template);
+      throw failure(category, reference, "非法 URI template: " + template);
     }
   }
 
   private static HttpMethod parseMethod(String category, String reference, String value) {
-    try {
-      if (!StringUtils.hasText(value)) {
-        throw new IllegalArgumentException();
-      }
-      String normalized = value.toUpperCase(Locale.ROOT);
-      Set<String> supported = Set.of(
-          "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE");
-      if (!supported.contains(normalized)) {
-        throw new IllegalArgumentException();
-      }
-      return HttpMethod.valueOf(normalized);
-    } catch (IllegalArgumentException exception) {
-      fail(category, reference, "非法 method: " + value);
-      throw exception;
+    if (!StringUtils.hasText(value)) {
+      throw failure(category, reference, "非法 method: " + value);
     }
+    String normalized = value.toUpperCase(Locale.ROOT);
+    if (!SUPPORTED_METHODS.contains(normalized)) {
+      throw failure(category, reference, "非法 method: " + value);
+    }
+    return HttpMethod.valueOf(normalized);
   }
 
   private static Set<String> parameterNames(Method method) {
@@ -190,7 +193,7 @@ final class RemoteToolInvocationFactory {
       } else if (parameter.isNamePresent()) {
         result.add(parameter.getName());
       } else {
-        fail("工具", method.getName(), "参数名不可用: " + parameter);
+        throw failure("工具", method.getName(), "参数名不可用: " + parameter);
       }
     }
     return result;
@@ -205,10 +208,11 @@ final class RemoteToolInvocationFactory {
     return result;
   }
 
-  private static void fail(String category, String reference, String detail) {
-    throw new IllegalStateException(category + " 端点 ref=" + reference + ": " + detail);
+  private static IllegalStateException failure(String category, String reference, String detail) {
+    return new IllegalStateException(category + " 端点 ref=" + reference + ": " + detail);
   }
 
+  @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
   private final class RemoteToolInvocation implements ToolInvoker {
 
     private final String reference;
@@ -218,29 +222,9 @@ final class RemoteToolInvocationFactory {
     private final Set<String> path;
     private final Map<String, String> query;
     private final Map<String, String> businessHeaders;
+    private final Set<String> businessHeaderNames;
     private final List<String> bodyFields;
     private final JavaType returnType;
-
-    private RemoteToolInvocation(
-        String reference,
-        String uriTemplate,
-        HttpMethod method,
-        Tool.Type type,
-        Set<String> path,
-        Map<String, String> query,
-        Map<String, String> businessHeaders,
-        List<String> bodyFields,
-        JavaType returnType) {
-      this.reference = reference;
-      this.uriTemplate = uriTemplate;
-      this.method = method;
-      this.type = type;
-      this.path = Set.copyOf(path);
-      this.query = query;
-      this.businessHeaders = businessHeaders;
-      this.bodyFields = List.copyOf(bodyFields);
-      this.returnType = returnType;
-    }
 
     /**
      * 在没有请求上下文时执行远程工具调用。
@@ -282,7 +266,7 @@ final class RemoteToolInvocationFactory {
                         + clientResponse.statusCode().value() + ": "
                         + new String(bytes, StandardCharsets.UTF_8)))))
             .block(requestTimeout);
-        return convert(response == null ? new byte[0] : response);
+        return convert(response);
       } catch (Exception exception) {
         throw new IllegalStateException(
             "远程工具 " + reference + " 调用失败: " + rootMessage(exception), exception);
@@ -294,22 +278,18 @@ final class RemoteToolInvocationFactory {
         Map<String, Object> arguments,
         Map<String, List<String>> requestHeaders) {
       request.headers(headers -> {
-        Set<String> businessNames = new HashSet<>();
-        for (String name : businessHeaders.keySet()) {
-          businessNames.add(name.toLowerCase(Locale.ROOT));
-        }
         requestHeaders.forEach((name, values) -> {
-          if (RemoteHeaderPolicy.isExcluded(name)
-              || businessNames.contains(name.toLowerCase(Locale.ROOT))) {
+          if (RemoteRequestHeaders.isExcluded(name)
+              || businessHeaderNames.contains(name.toLowerCase(Locale.ROOT))) {
             return;
           }
           values.forEach(value -> {
-            RemoteHeaderPolicy.validateValue(name, value);
+            RemoteRequestHeaders.validateValue(name, value);
             headers.add(name, value);
           });
         });
         businessHeaders.forEach((name, source) -> values(arguments.get(source)).forEach(value -> {
-          RemoteHeaderPolicy.validateValue(name, value);
+          RemoteRequestHeaders.validateValue(name, value);
           headers.add(name, value);
         }));
       });

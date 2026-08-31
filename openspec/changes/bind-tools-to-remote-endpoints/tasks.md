@@ -65,3 +65,9 @@
 
 - [x] 10.1 删除 `ToolHints`，将四个 `@Tool` 行为属性直接保存到 `ToolRegistration`，同步 scanner、registry 和测试，并确认本地与远程绑定完整保留 SDK ToolAnnotations
 - [x] 10.2 更新设计与验证材料，执行 starter、消费端、JavaDoc、严格 OpenSpec、结构计数和 Git 暂存检查
+
+## 11. Remote 包结构收敛
+
+- [x] 11.1 将 `RemoteHeaderPolicy` 与 `ServletToolContextExtractor` 合并为单一请求 Header 边界，收窄策略方法可见性，并通过提取、系统排除、CR/LF 和远程透传测试确认行为不变
+- [x] 11.2 将共享调用组件重命名为 `RemoteToolBindingFactory`，使用 Lombok 消除内部构造样板、绑定期预计算业务 Header 名称、删除不可达响应分支，并增加 API Fabric `path-template` 路径校验测试
+- [x] 11.3 更新验证材料，执行 starter、消费端、JavaDoc、严格 OpenSpec、结构计数、JAR 与 Git 暂存检查

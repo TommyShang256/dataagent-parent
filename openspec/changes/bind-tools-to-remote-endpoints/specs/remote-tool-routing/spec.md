@@ -153,3 +153,7 @@ starter SHALL 在向 MCP Server 发布任何远程绑定工具之前，验证全
 #### Scenario: 配置受限的传输 Header
 - **WHEN** 业务 Header 映射尝试设置 `Host`、`Content-Length` 或 `Connection` 等受限传输 Header
 - **THEN** 应用在发起任何远程请求之前启动失败
+
+#### Scenario: API Fabric 模板不是绝对路径
+- **WHEN** API Fabric `path-template` 未以单个 `/` 开头，或被配置为绝对 URI、scheme-relative URI
+- **THEN** 应用在发布工具目录之前启动失败，诊断信息明确指出对应引用和非法 `path-template`

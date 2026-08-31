@@ -146,6 +146,21 @@ class RemoteToolEndpointHandlerTest {
     var invalidMethod = validProperties();
     invalidMethod.getApiFabric().getEndpoints().get("create_order").setMethod("FETCH");
     assertFailure(invalidMethod, "API Fabric", "create_order", "method", "FETCH");
+
+    McpFabricProperties absolutePath = validProperties();
+    absolutePath.getApiFabric().getEndpoints().get("create_order")
+        .setPathTemplate("https://other.example/orders");
+    assertFailure(absolutePath, "API Fabric", "create_order", "path-template", "单个 /");
+
+    McpFabricProperties relativePath = validProperties();
+    relativePath.getApiFabric().getEndpoints().get("create_order")
+        .setPathTemplate("orders/{tenantId}");
+    assertFailure(relativePath, "API Fabric", "create_order", "path-template", "单个 /");
+
+    McpFabricProperties schemeRelativePath = validProperties();
+    schemeRelativePath.getApiFabric().getEndpoints().get("create_order")
+        .setPathTemplate("//other.example/orders/{tenantId}");
+    assertFailure(schemeRelativePath, "API Fabric", "create_order", "path-template", "单个 /");
   }
 
   @Test

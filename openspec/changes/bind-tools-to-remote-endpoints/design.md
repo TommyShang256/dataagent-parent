@@ -153,6 +153,27 @@ API Fabric URI 先组合已校验的基础 URL 与 path template，再展开 pat
 
 备选方案：保留一个同时处理 API Fabric 和 CSE 的 binder，仅替换 WebClient provider。不采用，因为无法单独替换某一端点类别的配置解释、校验和 URI 构造。备选方案：对公共接口使用单一 `@ConditionalOnMissingBean`。不采用，因为任意自定义实现都会错误地关闭其他默认类别。
 
+### 6.2 收敛 remote 包内部结构
+
+`RemoteHeaderPolicy` 与 `ServletToolContextExtractor` 都负责同一条请求 Header 边界：前者定义系统排除和 CR/LF
+规则，后者按规则提取当前 Servlet 请求。将二者合并为 `RemoteRequestHeaders`，由该类实现 SDK transport
+extractor，并以包级静态方法向共享远程绑定代码提供相同策略。排除集合和校验方法不再成为独立公共 API，
+transport context key 使用合并后类名，registry 仍只读取不可变多值 Header 映射。
+
+共享组件从 `RemoteToolInvocationFactory` 重命名为 `RemoteToolBindingFactory`，准确表达其职责是把注解方法和端点
+配置编译为远程 `ToolRegistration`。该组件继续以内部嵌套 invoker 保存不可变调用计划，不拆成额外的 compiler、
+plan 和 executor 类型。绑定期预计算不区分大小写的业务 Header 名称，运行期只应用当前请求参数和 Header；内部
+构造器使用 Lombok 消除样板，删除响应式调用不可能产生的 null 响应分支。
+
+API Fabric handler 在组合 `base-url` 前验证 `path-template` 必须以单个 `/` 开头，拒绝绝对 URI、
+scheme-relative URI 和缺少根斜杠的模板。API Fabric 与 CSE 两个 handler 仍作为独立默认类存在；
+`RemoteToolEndpointHandler` 负责替换配置解释和绑定策略，`RemoteToolWebClientProvider` 负责替换 connector、认证和
+客户端行为，二者不合并。
+
+备选方案：合并 API Fabric/CSE handler。不采用，因为会恢复类型分支并破坏独立替换边界。备选方案：删除
+WebClient provider、要求自定义 handler 重写整个请求管线。不采用，因为消费端确实需要只替换 CSE connector。
+备选方案：把共享绑定组件拆成多个顶层类型。不采用，因为验证、参数划分和执行共同构成一次配置到 invoker 的编译。
+
 ### 7. Server 注册前完成全部校验
 
 registry 添加任何 SDK tool specification 之前，先编译端点目录和全部方法绑定。校验范围包括：空白或非法 URL/method、两个端点类别中的重复引用、没有注解工具的配置引用、URI 占位符没有同名工具参数、Query/业务 Header 引用未知参数、参数位置冲突、重复下游名称、业务 Header 使用系统排除名称，以及不支持的 media 配置。

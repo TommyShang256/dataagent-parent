@@ -26,7 +26,7 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
   public static final String BEAN_NAME = "apiFabricToolEndpointHandler";
 
   private final McpFabricProperties.ApiFabric properties;
-  private final RemoteToolInvocationFactory invocationFactory;
+  private final RemoteToolBindingFactory bindingFactory;
 
   /**
    * 创建 API Fabric 端点处理器。
@@ -40,7 +40,7 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
       ObjectMapper objectMapper,
       RemoteToolWebClientProvider clients) {
     this.properties = properties.getApiFabric();
-    this.invocationFactory = new RemoteToolInvocationFactory(
+    this.bindingFactory = new RemoteToolBindingFactory(
         objectMapper, clients, properties.getRequestTimeout());
   }
 
@@ -80,11 +80,18 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
       throw new IllegalArgumentException("API Fabric 端点 ref=" + reference + ": 未配置该引用");
     }
     String pathTemplate = endpoint.getPathTemplate();
-    String template = StringUtils.hasText(pathTemplate)
-        ? properties.getBaseUrl().replaceAll("/+$", "") + "/" + pathTemplate.replaceAll("^/+", "")
-        : pathTemplate;
-    return invocationFactory.bind(
+    validatePathTemplate(reference, pathTemplate);
+    String template = properties.getBaseUrl().replaceAll("/+$", "") + pathTemplate;
+    return bindingFactory.bind(
         endpointType(), method, registration, endpoint, template, Tool.Type.API_FABRIC);
+  }
+
+  private static void validatePathTemplate(String reference, String pathTemplate) {
+    if (!StringUtils.hasText(pathTemplate)
+        || !pathTemplate.startsWith("/")
+        || pathTemplate.startsWith("//")) {
+      fail(reference, "path-template 必须是以单个 / 开头的路径");
+    }
   }
 
   private void validateBaseUrl() {

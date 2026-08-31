@@ -8,6 +8,7 @@
 | CSE 引用绑定注解工具 | `RemoteToolEndpointHandlerTest.preservesCseSchemeAndConvertsGenericResponseWithoutExecutingProxyBody`；消费端固定目录测试 |
 | 未绑定的注解工具保持本地调用 | `RemoteToolEndpointHandlerTest.leavesUnmatchedAnnotationToolLocalAndMapsDownstreamErrors` |
 | 组装 API Fabric URI | starter 与消费端完整请求映射测试 |
+| API Fabric 模板不是绝对路径 | `RemoteToolEndpointHandlerTest.validatesWholeCatalogBeforeReturningAnyRegistration`，覆盖绝对 URL、相对路径和 scheme-relative 路径 |
 | CSE URI 保持不变 | starter 与消费端 CSE 捕获请求断言 |
 | 只替换 API Fabric 实现 | `McpFabricAutoConfigurationTest.applicationCanReplaceOnlyApiFabricEndpointHandler` |
 | 只替换 CSE 实现 | `McpFabricAutoConfigurationTest.applicationCanReplaceOnlyCseEndpointHandler` |
@@ -24,7 +25,7 @@
 | 可选业务 Header 缺失 | starter 的 null/缺失值省略逻辑及聚焦请求捕获测试 |
 | 入站 Header 被透传 | starter多值 `Authorization` 与消费端 `Authorization`、`X-Trace-Id` 断言 |
 | 业务 Header 优先于同名入站 Header | starter和消费端不区分大小写覆盖断言 |
-| 系统 Header 自动排除 | `ServletToolContextExtractorTest` 与两级请求捕获的 `Host` 过滤断言 |
+| 系统 Header 自动排除 | `RemoteRequestHeadersTest` 与两级请求捕获的 `Host` 过滤断言 |
 | 透传值不进入审计数据 | `McpToolRegistryTest.passesTransportContextThroughHandlerAndAuditWrapperWithoutAuditingHeaders` |
 | 不同请求之间不泄漏 Header | 同一测试连续使用 `first`、`second` 两组 Header 映射的隔离断言 |
 | 转换结构化响应 | starter record/泛型测试及消费端 `Order`、`Reservation` 转换断言 |
@@ -60,11 +61,18 @@
 直接接收不可变多值 Header 映射；starter registry 测试和消费端完整请求测试验证 Header 透传、审计隔离及
 请求间隔离行为不变。
 
-其余生产类型也已逐项审计：`ServletToolContextExtractor` 必须实现 SDK transport SPI；`RemoteHeaderPolicy`
-被提取器与远程请求管线共同使用；`RemoteToolInvocationFactory` 负责 API Fabric/CSE 共享的请求编译和执行。
-它们均具有独立职责，不是可以无损内联的单字段或纯转发包装。
+Remote 包收敛检查：`RemoteRequestHeaders` 同时承担 SDK transport SPI、系统 Header 排除和 CR/LF 校验，替代
+原先两个共同维护同一边界的类型；`RemoteToolBindingFactory` 负责 API Fabric/CSE 共享的请求绑定和执行，并在
+绑定期预计算业务 Header 名称。API Fabric 与 CSE 默认处理器及公共 SPI 继续独立，确保两类端点能够分别替换。
+本轮在相同 `javap -p` 口径下使生产源码从 19 个减少到 18 个、编译类从 33 个减少到 32 个，构造器和方法保持
+220 个；remote 包收敛为 6 个生产源码、706 行。新增路径校验方法与删除的重复 Header 类型成员相互抵消，未以
+隐藏逻辑换取成员数量下降。
 
 工具行为属性内联检查：`ToolHints` 已删除，scanner 将 `@Tool.readOnly`、`destructive`、`idempotent` 和
 `openWorld` 直接写入 `ToolRegistration`。`McpToolRegistryTest.generatedSpecificationInvokesMcpHandler` 验证四个
 值原样生成 SDK `ToolAnnotations`；`RemoteToolEndpointHandlerTest.bindsFabricRequestWithAutomaticPathBodyQueryAndHeaderRules`
 验证远程 invoker 与类型替换后四个值仍完整保留。
+
+最终门禁：starter `clean verify` 共 45 个测试、消费端 `clean verify` 共 4 个测试全部通过；两侧 JavaDoc 均
+生成成功；严格 OpenSpec 校验和 `git diff --check` 通过。starter JAR 只包含收敛后的 7 个 remote 编译类，未
+包含 `RemoteHeaderPolicy`、`ServletToolContextExtractor` 或 `RemoteToolInvocationFactory` 陈旧类。

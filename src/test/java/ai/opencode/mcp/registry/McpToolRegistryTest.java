@@ -8,7 +8,7 @@ import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
-import ai.opencode.mcp.remote.ServletToolContextExtractor;
+import ai.opencode.mcp.remote.RemoteRequestHeaders;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -164,7 +164,7 @@ class McpToolRegistryTest {
     assertThat(events.getLast().arguments()).containsOnlyKeys("message");
 
     var transport = io.modelcontextprotocol.common.McpTransportContext.create(Map.of(
-        ServletToolContextExtractor.class.getName(),
+        RemoteRequestHeaders.class.getName(),
         Map.of("Authorization", List.of("second"))));
     var session = new io.modelcontextprotocol.spec.McpLoggableSession() {
       @Override public <T> reactor.core.publisher.Mono<T> sendRequest(
