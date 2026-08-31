@@ -5,21 +5,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.annotation.ToolParam;
-import ai.opencode.mcp.api.ToolHints;
-import ai.opencode.mcp.api.ToolOrigin;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.Slf4jToolAuditLogger;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
-import ai.opencode.mcp.remote.RemoteToolClient;
+import ai.opencode.mcp.remote.ApiFabricToolEndpointHandler;
+import ai.opencode.mcp.remote.CseToolEndpointHandler;
+import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
 import ai.opencode.mcp.scanner.McpToolScanner;
-import ai.opencode.mcp.scanner.ToolEndpointBinder;
 import io.modelcontextprotocol.server.McpSyncServer;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.jupiter.api.Test;
@@ -31,6 +31,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClient;
 
+/**
+ * 验证 MCP 自动配置、条件装配和远程端点处理器替换行为。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 class McpFabricAutoConfigurationTest {
 
   private final WebApplicationContextRunner baseRunner = new WebApplicationContextRunner()
@@ -39,35 +45,27 @@ class McpFabricAutoConfigurationTest {
   private final WebApplicationContextRunner runner = baseRunner.withUserConfiguration(TestConfiguration.class);
 
   @Test
-  void registersLocalAndRemoteTools() {
+  void registersAnnotatedTools() {
     runner.run(context -> {
       assertThat(context).hasSingleBean(McpToolScanner.class);
       assertThat(context).hasSingleBean(McpToolRegistry.class);
-      assertThat(context.getBeansOfType(RemoteToolClient.class)).hasSize(2);
       var servletRegistration = (ServletRegistrationBean<?>) context.getBean("mcpServletRegistration");
       assertThat(servletRegistration.getUrlMappings()).containsExactly("/rest/mcp");
       var tools = context.getBean(McpToolRegistry.class).tools();
       assertThat(tools).extracting(ToolRegistration::name)
-          .containsExactlyInAnyOrder("local_echo", "fabric_echo", "server_comb_echo", "failing_tool");
-      assertThat(tools).filteredOn(tool -> tool.name().equals("local_echo"))
-          .extracting(ToolRegistration::origin)
-          .containsExactly(ToolOrigin.local(LocalTools.class.getName()));
-      assertThat(tools).filteredOn(tool -> tool.name().equals("fabric_echo"))
-          .extracting(tool -> tool.origin().kind())
-          .containsExactly(ToolOrigin.Kind.API_FABRIC);
-      assertThat(tools).filteredOn(tool -> tool.name().equals("server_comb_echo"))
-          .extracting(ToolRegistration::origin)
-          .containsExactly(ToolOrigin.serverComb("inventory"));
+          .containsExactlyInAnyOrder("local_echo", "second_echo", "third_echo", "failing_tool");
+      assertThat(tools).extracting(ToolRegistration::type)
+          .containsOnly(Tool.Type.LOCAL);
     });
   }
 
   @Test
-  void invokesLocalAndRemoteToolsAndAuditsOperations() {
+  void invokesAnnotatedToolsAndAuditsOperations() {
     runner.run(context -> {
       var registry = context.getBean(McpToolRegistry.class);
       assertThat(invoke(registry, "local_echo", Map.of("message", "hello"))).isEqualTo("hello");
-      assertThat(invoke(registry, "fabric_echo", Map.of())).isEqualTo("api-fabric");
-      assertThat(invoke(registry, "server_comb_echo", Map.of())).isEqualTo("cse");
+      assertThat(invoke(registry, "second_echo", Map.of())).isEqualTo("second");
+      assertThat(invoke(registry, "third_echo", Map.of())).isEqualTo("third");
 
       var events = context.getBean(RecordingAuditLogger.class).events;
       assertThat(events).filteredOn(event -> event.operation() == ToolAuditEvent.Operation.REGISTER)
@@ -124,7 +122,7 @@ class McpFabricAutoConfigurationTest {
       assertThat(capabilities.prompts()).isNull();
       assertThat(capabilities.completions()).isNull();
       assertThat(server.listTools()).extracting(tool -> tool.name())
-          .containsExactlyInAnyOrder("local_echo", "fabric_echo", "server_comb_echo", "failing_tool");
+          .containsExactlyInAnyOrder("local_echo", "second_echo", "third_echo", "failing_tool");
     });
   }
 
@@ -134,7 +132,7 @@ class McpFabricAutoConfigurationTest {
       assertThat(context).doesNotHaveBean(McpSyncServer.class);
       assertThat(context).doesNotHaveBean(McpToolScanner.class);
       assertThat(context).doesNotHaveBean(McpToolRegistry.class);
-      assertThat(context).doesNotHaveBean(ToolEndpointBinder.class);
+      assertThat(context).doesNotHaveBean(RemoteToolEndpointHandler.class);
       assertThat(context).doesNotHaveBean(RemoteToolWebClientProvider.class);
     });
   }
@@ -156,6 +154,57 @@ class McpFabricAutoConfigurationTest {
     });
   }
 
+  @Test
+  void createsIndependentDefaultEndpointHandlers() {
+    baseRunner.run(context -> {
+      assertThat(context.getBeansOfType(RemoteToolEndpointHandler.class)).hasSize(2);
+      assertThat(context).hasSingleBean(ApiFabricToolEndpointHandler.class);
+      assertThat(context).hasSingleBean(CseToolEndpointHandler.class);
+    });
+  }
+
+  @Test
+  void applicationCanReplaceOnlyApiFabricEndpointHandler() {
+    RemoteToolEndpointHandler custom = new StubEndpointHandler("自定义 API Fabric");
+    baseRunner.withBean(
+        ApiFabricToolEndpointHandler.BEAN_NAME,
+        RemoteToolEndpointHandler.class,
+        () -> custom).run(context -> {
+          assertThat(context.getBeansOfType(RemoteToolEndpointHandler.class)).hasSize(2);
+          assertThat(context.getBean(ApiFabricToolEndpointHandler.BEAN_NAME)).isSameAs(custom);
+          assertThat(context).doesNotHaveBean(ApiFabricToolEndpointHandler.class);
+          assertThat(context).hasSingleBean(CseToolEndpointHandler.class);
+        });
+  }
+
+  @Test
+  void applicationCanReplaceOnlyCseEndpointHandler() {
+    RemoteToolEndpointHandler custom = new StubEndpointHandler("自定义 CSE");
+    baseRunner.withBean(
+        CseToolEndpointHandler.BEAN_NAME,
+        RemoteToolEndpointHandler.class,
+        () -> custom).run(context -> {
+          assertThat(context.getBeansOfType(RemoteToolEndpointHandler.class)).hasSize(2);
+          assertThat(context.getBean(CseToolEndpointHandler.BEAN_NAME)).isSameAs(custom);
+          assertThat(context).hasSingleBean(ApiFabricToolEndpointHandler.class);
+          assertThat(context).doesNotHaveBean(CseToolEndpointHandler.class);
+        });
+  }
+
+  @Test
+  void applicationCanAddAnotherEndpointHandler() {
+    RemoteToolEndpointHandler extension = new StubEndpointHandler("扩展端点");
+    baseRunner.withBean(
+        "extensionToolEndpointHandler",
+        RemoteToolEndpointHandler.class,
+        () -> extension).run(context -> {
+          assertThat(context.getBeansOfType(RemoteToolEndpointHandler.class)).hasSize(3);
+          assertThat(context.getBean("extensionToolEndpointHandler")).isSameAs(extension);
+          assertThat(context).hasSingleBean(ApiFabricToolEndpointHandler.class);
+          assertThat(context).hasSingleBean(CseToolEndpointHandler.class);
+        });
+  }
+
   private static Object invoke(McpToolRegistry registry, String name, Map<String, Object> arguments) throws Exception {
     return registry.tools().stream()
         .filter(tool -> tool.name().equals(name))
@@ -174,24 +223,6 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Bean
-    RemoteToolClient apiFabricClient() {
-      return RemoteToolClient.of(
-          "orders",
-          ToolOrigin.Kind.API_FABRIC,
-          List.of(remoteTool("fabric_echo", "Remote echo")),
-          (toolName, arguments) -> "api-fabric");
-    }
-
-    @Bean
-    RemoteToolClient cseClient() {
-      return RemoteToolClient.of(
-          "inventory",
-          ToolOrigin.Kind.SERVER_COMB,
-          List.of(remoteTool("server_comb_echo", "ServerComb echo")),
-          (toolName, arguments) -> "cse");
-    }
-
-    @Bean
     FailingTools failingTools() {
       return new FailingTools();
     }
@@ -199,15 +230,6 @@ class McpFabricAutoConfigurationTest {
     @Bean
     RecordingAuditLogger toolAuditLogger() {
       return new RecordingAuditLogger();
-    }
-
-    private static RemoteToolClient.ToolDefinition remoteTool(String name, String description) {
-      return new RemoteToolClient.ToolDefinition(
-          name,
-          null,
-          description,
-          Map.of("type", "object", "additionalProperties", false),
-          ToolHints.DEFAULT);
     }
   }
 
@@ -227,6 +249,16 @@ class McpFabricAutoConfigurationTest {
     String echo(@ToolParam(description = "Value to echo") String message) {
       return message;
     }
+
+    @Tool(name = "second_echo", description = "Return the second value", readOnly = true)
+    String secondEcho() {
+      return "second";
+    }
+
+    @Tool(name = "third_echo", description = "Return the third value", readOnly = true)
+    String thirdEcho() {
+      return "third";
+    }
   }
 
   static class FailingTools {
@@ -234,6 +266,47 @@ class McpFabricAutoConfigurationTest {
     @Tool(name = "failing_tool")
     Object fail(@ToolParam(name = "secret", required = false) String secret) {
       throw new IllegalStateException("sensitive failure detail");
+    }
+  }
+
+  private static final class StubEndpointHandler implements RemoteToolEndpointHandler {
+
+    private final String endpointType;
+
+    private StubEndpointHandler(String endpointType) {
+      this.endpointType = endpointType;
+    }
+
+    /**
+     * 获取测试端点类型。
+     *
+     * @return 测试端点类型
+     */
+    @Override
+    public String endpointType() {
+      return endpointType;
+    }
+
+    /**
+     * 获取空的测试引用集合。
+     *
+     * @return 空集合
+     */
+    @Override
+    public Set<String> references() {
+      return Set.of();
+    }
+
+    /**
+     * 返回测试输入注册信息。
+     *
+     * @param method 注解工具对应的 Java 方法
+     * @param registration 工具注册信息
+     * @return 原始工具注册信息
+     */
+    @Override
+    public ToolRegistration bind(java.lang.reflect.Method method, ToolRegistration registration) {
+      return registration;
     }
   }
 }

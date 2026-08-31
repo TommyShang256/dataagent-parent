@@ -7,6 +7,8 @@ package ai.opencode.mcp.api;
  * @param destructive 工具是否可能产生破坏性变更
  * @param idempotent 工具是否幂等
  * @param openWorld 工具是否可能访问外部实体
+ * @author beining.shang
+ * @since 2026-08-31
  */
 public record ToolHints(boolean readOnly, boolean destructive, boolean idempotent, boolean openWorld) {
 

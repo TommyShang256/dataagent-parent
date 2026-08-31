@@ -8,6 +8,12 @@ import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
+/**
+ * 验证 MCP 与远程端点配置属性的绑定和默认值。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 class McpFabricPropertiesTest {
 
   @Test

@@ -1,6 +1,5 @@
 package ai.opencode.mcp.remote;
 
-import ai.opencode.mcp.api.ToolInvocationContext;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.server.McpTransportContextExtractor;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,11 +11,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 提取安全的请求 Header，且不保留 Servlet 请求状态。 */
+/**
+ * 从 Servlet 请求提取安全 Header，且不保留请求对象状态。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 public final class ServletToolContextExtractor implements McpTransportContextExtractor<HttpServletRequest> {
-
-  /** 创建 Servlet 工具调用上下文提取器。 */
-  public ServletToolContextExtractor() {}
 
   /**
    * 从 Servlet 请求提取可安全透传的多值 Header 上下文。
@@ -47,6 +48,6 @@ public final class ServletToolContextExtractor implements McpTransportContextExt
       }
     }
     return McpTransportContext.create(Map.of(
-        ToolInvocationContext.TRANSPORT_HEADERS_KEY, Collections.unmodifiableMap(headers)));
+        ServletToolContextExtractor.class.getName(), Collections.unmodifiableMap(headers)));
   }
 }

@@ -28,6 +28,12 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+/**
+ * 验证 Java 参数类型到 MCP 工具 JSON Schema 的转换能力。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 class McpJsonSchemaGeneratorTest {
 
   private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();

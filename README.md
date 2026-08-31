@@ -108,12 +108,35 @@ API Fabric 将公共 `base-url` 与 `path-template` 组合。CSE 的完整 `cse:
 ```java
 @Bean
 RemoteToolWebClientProvider remoteClients(WebClient cseClient, WebClient fabricClient) {
-  return origin -> origin == ToolOrigin.Kind.SERVER_COMB ? cseClient : fabricClient;
+  return type -> type == Tool.Type.CSE ? cseClient : fabricClient;
 }
 ```
 
 调用沿用同步 MCP Server 模式，并以 `opencode.mcp.request-timeout` 作为阻塞等待上限。非 2xx 状态、connector
 失败、超时、URI 构建和返回值转换失败都会成为 `isError=true` 的 MCP 工具结果，应用和固定目录保持可用。
+
+## 替换远程端点处理器
+
+API Fabric 和 CSE 通过公共扩展接口 `RemoteToolEndpointHandler` 接入，starter 默认提供
+`ApiFabricToolEndpointHandler` 与 `CseToolEndpointHandler`。`McpToolScanner` 汇总所有实现，统一检查未知 ref 和跨实现
+重复 ref，并将未匹配远程引用的注解工具保留为本地调用。
+
+扫描和绑定完成后，`ToolRegistration.type` 使用 `Tool.Type.LOCAL`、`API_FABRIC`、`CSE` 或 `CUSTOM`
+标识最终执行类别。该类型由端点绑定结果确定，不是 `@Tool` 的可配置属性；自定义端点处理器可以使用
+`CUSTOM` 标识自己的远程调用实现。
+
+两个默认实现可以独立替换。自定义 Bean 使用对应的固定名称即可只替换一个类别，不会关闭另一个默认实现：
+
+```java
+@Bean(name = ApiFabricToolEndpointHandler.BEAN_NAME)
+RemoteToolEndpointHandler customApiFabricHandler() {
+  return new CustomApiFabricToolEndpointHandler();
+}
+```
+
+替换 CSE 时使用 `CseToolEndpointHandler.BEAN_NAME`。应用也可以使用其他 Bean 名增加新的
+`RemoteToolEndpointHandler` 实现；新增实现会自动进入组合绑定和全局 ref 冲突校验。实现必须返回稳定的端点类型名称、
+不可变的 ref 集合，并只绑定名称已匹配其 ref 的 Java 方法和 `ToolRegistration`。
 
 ## 启动校验
 
@@ -121,8 +144,8 @@ RemoteToolWebClientProvider remoteClients(WebClient cseClient, WebClient fabricC
 或 URI、模板占位符缺少同名参数、Query/业务 Header 引用未知参数、参数位置冲突、重复下游名称，以及业务
 Header 使用系统排除名称。失败时不会发布部分工具目录。
 
-通用的 `RemoteToolClient` 注册方式继续保留，适用于应用自行完成发现、Schema 和执行的远程系统；它与基于
-注解签名的配置端点绑定相互独立。
+工具统一通过 `@Tool` 注解声明。本地工具直接执行 Java 方法；名称匹配 API Fabric 或 CSE 端点
+配置的工具由对应 handler 替换调用目标，但继续使用同一注解签名生成 Schema。
 
 ## JSON Schema
 

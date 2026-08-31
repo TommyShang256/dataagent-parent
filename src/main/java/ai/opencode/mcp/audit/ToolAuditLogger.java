@@ -1,6 +1,11 @@
 package ai.opencode.mcp.audit;
 
-/** 记录 MCP 工具注册与调用审计事件。 */
+/**
+ * 定义 MCP 工具注册与调用审计事件的记录契约。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 @FunctionalInterface
 public interface ToolAuditLogger {
 

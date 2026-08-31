@@ -33,6 +33,21 @@ starter SHALL 为每个 CSE 引用接受 HTTP method 和完整的 `cse://service
 - **WHEN** 匹配的 CSE 引用展开为 `cse://inventory-service/items/SKU-1`
 - **THEN** 下游客户端收到完整 URI，且 `cse` scheme 保持不变
 
+### Requirement: 远程端点类别通过统一接口独立替换
+starter SHALL 通过公共远程端点处理接口接入不同端点类别，并分别提供 API Fabric 和 CSE 默认实现。应用替换其中一个类别的实现时，MUST NOT 禁用或替换另一个类别的默认实现；scanner 必须汇总全部实现并统一完成工具绑定与跨实现引用校验。
+
+#### Scenario: 只替换 API Fabric 实现
+- **WHEN** 应用提供自定义 API Fabric 端点处理实现
+- **THEN** starter 使用该自定义实现处理 API Fabric 引用，同时继续使用默认 CSE 实现
+
+#### Scenario: 只替换 CSE 实现
+- **WHEN** 应用提供自定义 CSE 端点处理实现
+- **THEN** starter 使用该自定义实现处理 CSE 引用，同时继续使用默认 API Fabric 实现
+
+#### Scenario: 不同实现声明重复引用
+- **WHEN** 任意两个远程端点处理实现声明同一个引用
+- **THEN** 应用在发布工具目录前启动失败，诊断信息指出重复引用及对应实现
+
 ### Requirement: 按简化规则确定工具参数位置
 starter SHALL 从 `path-template` 或 CSE URI template 的占位符自动识别同名 Path 工具参数。Query 和业务 Header 参数必须通过配置显式映射；排除 Path、Query 和业务 Header 参数后，剩余工具参数必须按原参数名自动成为 JSON Body 字段。透传 Header 不属于工具参数，不参与参数位置计算。
 

@@ -58,6 +58,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 
+/**
+ * 将注解工具方法的 Java 参数类型转换为 Agent 可用的 JSON Schema。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 final class McpJsonSchemaGenerator {
 

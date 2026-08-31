@@ -3,12 +3,13 @@ package ai.opencode.mcp.registry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.api.ToolHints;
 import ai.opencode.mcp.api.ToolInvoker;
-import ai.opencode.mcp.api.ToolInvocationContext;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
+import ai.opencode.mcp.remote.ServletToolContextExtractor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -21,6 +22,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
+/**
+ * 验证 MCP 工具目录发布、回滚、调用和审计行为。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 class McpToolRegistryTest {
 
   @Test
@@ -88,7 +95,7 @@ class McpToolRegistryTest {
         .containsExactly(ToolAuditEvent.Operation.REGISTER, ToolAuditEvent.Operation.INVOKE);
     assertThat(events.get(1).arguments()).containsEntry("message", "hello");
     assertThat(events.get(1).result()).isEqualTo("hello");
-    assertThat(events).allMatch(event -> event.duration() != null && event.origin() != null);
+    assertThat(events).allMatch(event -> event.duration() != null && event.type() != null);
   }
 
   @Test
@@ -124,11 +131,11 @@ class McpToolRegistryTest {
 
   @Test
   void passesTransportContextThroughHandlerAndAuditWrapperWithoutAuditingHeaders() throws Exception {
-    var received = new AtomicReference<ToolInvocationContext>();
+    var received = new AtomicReference<Map<String, List<String>>>();
     ToolInvoker contextAware = new ToolInvoker() {
       @Override public Object invoke(Map<String, Object> arguments) { return "without-context"; }
-      @Override public Object invoke(Map<String, Object> arguments, ToolInvocationContext context) {
-        received.set(context);
+      @Override public Object invoke(Map<String, Object> arguments, Map<String, List<String>> headers) {
+        received.set(headers);
         return arguments.get("message");
       }
     };
@@ -136,13 +143,14 @@ class McpToolRegistryTest {
     var registry = registry(List.of(registration("context", contextAware)), new FakeToolServer(), events::add);
     registry.afterSingletonsInstantiated();
 
-    var first = new ToolInvocationContext(Map.of("Authorization", List.of("first")));
+    Map<String, List<String>> first = Map.of("Authorization", List.of("first"));
     assertThat(find(registry, "context").invoker().invoke(Map.of("message", "one"), first)).isEqualTo("one");
-    assertThat(received.get().headers()).containsEntry("Authorization", List.of("first"));
+    assertThat(received.get()).containsEntry("Authorization", List.of("first"));
     assertThat(events.getLast().arguments()).containsOnlyKeys("message");
 
     var transport = io.modelcontextprotocol.common.McpTransportContext.create(Map.of(
-        ToolInvocationContext.TRANSPORT_HEADERS_KEY, Map.of("Authorization", List.of("second"))));
+        ServletToolContextExtractor.class.getName(),
+        Map.of("Authorization", List.of("second"))));
     var session = new io.modelcontextprotocol.spec.McpLoggableSession() {
       @Override public <T> reactor.core.publisher.Mono<T> sendRequest(
           String method, Object parameters, io.modelcontextprotocol.json.TypeRef<T> typeRef) {
@@ -162,7 +170,7 @@ class McpToolRegistryTest {
     var result = registry.toSpecification(find(registry, "context")).callHandler().apply(
         exchange, McpSchema.CallToolRequest.builder("context").arguments(Map.of("message", "two")).build());
     assertText(result, "two", false);
-    assertThat(received.get().headers()).containsEntry("Authorization", List.of("second"));
+    assertThat(received.get()).containsEntry("Authorization", List.of("second"));
   }
 
   private static McpToolRegistry registry(
@@ -177,7 +185,13 @@ class McpToolRegistryTest {
 
   private static ToolRegistration registration(String name, ToolInvoker invoker) {
     return new ToolRegistration(
-        name, null, null, Map.of("type", "object", "additionalProperties", false), invoker, ToolHints.DEFAULT);
+        name,
+        null,
+        null,
+        Map.of("type", "object", "additionalProperties", false),
+        invoker,
+        ToolHints.DEFAULT,
+        Tool.Type.LOCAL);
   }
 
   private static void assertText(McpSchema.CallToolResult result, String text, boolean error) {

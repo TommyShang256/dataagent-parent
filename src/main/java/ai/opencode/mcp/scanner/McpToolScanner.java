@@ -3,22 +3,23 @@ package ai.opencode.mcp.scanner;
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.annotation.ToolParam;
 import ai.opencode.mcp.api.ToolHints;
-import ai.opencode.mcp.api.ToolMethodRegistration;
-import ai.opencode.mcp.api.ToolOrigin;
 import ai.opencode.mcp.api.ToolRegistration;
-import ai.opencode.mcp.remote.RemoteToolClient;
+import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.springframework.aop.support.AopUtils;
@@ -26,8 +27,14 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.core.MethodIntrospector;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.util.ReflectionUtils;
+import org.springframework.util.StringUtils;
 
-/** 发现本地注解方法和远程工具客户端，并生成标准化注册。 */
+/**
+ * 发现本地注解方法和远程工具客户端，并生成经过端点绑定的标准化注册。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 public final class McpToolScanner {
 
   private final ConfigurableListableBeanFactory beanFactory;
@@ -36,75 +43,107 @@ public final class McpToolScanner {
 
   private final McpJsonSchemaGenerator schemaGenerator;
 
-  private final ToolEndpointBinder endpointBinder;
+  private final List<RemoteToolEndpointHandler> endpointHandlers;
 
   /**
-   * 创建只保留本地注解方法行为的工具扫描器。
+   * 创建使用指定远程端点处理器的工具扫描器。
    *
    * @param beanFactory Spring Bean 工厂
    * @param objectMapper 应用的 Jackson 映射器
-   */
-  public McpToolScanner(ConfigurableListableBeanFactory beanFactory, ObjectMapper objectMapper) {
-    this(beanFactory, objectMapper, ToolEndpointBinder.LOCAL_ONLY);
-  }
-
-  /**
-   * 创建使用指定端点绑定策略的工具扫描器。
-   *
-   * @param beanFactory Spring Bean 工厂
-   * @param objectMapper 应用的 Jackson 映射器
-   * @param endpointBinder 注解工具端点绑定器
+   * @param endpointHandlers 远程端点处理器
    */
   public McpToolScanner(
-      ConfigurableListableBeanFactory beanFactory, ObjectMapper objectMapper, ToolEndpointBinder endpointBinder) {
+      ConfigurableListableBeanFactory beanFactory,
+      ObjectMapper objectMapper,
+      List<RemoteToolEndpointHandler> endpointHandlers) {
     this.beanFactory = beanFactory;
     this.objectMapper = objectMapper;
     this.schemaGenerator = new McpJsonSchemaGenerator(objectMapper);
-    this.endpointBinder = endpointBinder;
+    this.endpointHandlers = endpointHandlers == null ? List.of() : List.copyOf(endpointHandlers);
   }
 
   /**
-   * 扫描本地注解工具和通用远程工具客户端，并生成固定工具目录。
+   * 扫描本地注解工具，并生成完成远程端点绑定的固定工具目录。
    *
    * @return 标准化且已完成端点绑定的工具注册列表
    */
   public List<ToolRegistration> scan() {
-    List<ToolMethodRegistration> localMethods =
-        Arrays.stream(beanFactory.getBeanDefinitionNames()).flatMap(this::scanBean).toList();
-    Stream<ToolRegistration> local = endpointBinder.bind(localMethods).stream();
-    Stream<ToolRegistration> remote = beanFactory.getBeansOfType(RemoteToolClient.class, false, false).values().stream()
-        .flatMap(this::scanRemote);
-    return Stream.concat(local, remote).toList();
+    Map<String, RemoteToolEndpointHandler> handlers = handlersByReference();
+    List<ToolRegistration> tools = Arrays.stream(beanFactory.getBeanDefinitionNames())
+        .flatMap(beanName -> scanBean(beanName, handlers))
+        .toList();
+    validateReferences(tools, handlers);
+    return tools;
   }
 
   List<ToolRegistration> scan(Object toolProvider) {
-    return endpointBinder.bind(scanMethods(toolProvider));
+    Map<String, RemoteToolEndpointHandler> handlers = handlersByReference();
+    List<ToolRegistration> tools = scanMethods(toolProvider, handlers);
+    validateReferences(tools, handlers);
+    return tools;
   }
 
-  private Stream<ToolMethodRegistration> scanBean(String beanName) {
+  private Stream<ToolRegistration> scanBean(
+      String beanName, Map<String, RemoteToolEndpointHandler> handlers) {
     Class<?> type = beanFactory.getType(beanName, false);
     if (type == null || annotatedMethods(type).isEmpty()) {
       return Stream.empty();
     }
-    return scanMethods(beanFactory.getBean(beanName)).stream();
+    return scanMethods(beanFactory.getBean(beanName), handlers).stream();
   }
 
-  private List<ToolMethodRegistration> scanMethods(Object toolProvider) {
+  private List<ToolRegistration> scanMethods(
+      Object toolProvider, Map<String, RemoteToolEndpointHandler> handlers) {
     return annotatedMethods(AopUtils.getTargetClass(toolProvider)).stream()
-        .map(method -> new ToolMethodRegistration(method, toRegistration(toolProvider, method)))
+        .map(method -> {
+          ToolRegistration registration = toRegistration(toolProvider, method);
+          RemoteToolEndpointHandler handler = handlers.get(registration.name());
+          return handler == null ? registration : handler.bind(method, registration);
+        })
         .toList();
   }
 
-  private Stream<ToolRegistration> scanRemote(RemoteToolClient client) {
-    ToolOrigin origin = new ToolOrigin(client.originKind(), client.id());
-    return client.tools().stream().map(tool -> new ToolRegistration(
-        tool.name(),
-        tool.title(),
-        tool.description(),
-        tool.inputSchema(),
-        arguments -> client.execute(tool.name(), arguments),
-        tool.hints(),
-        origin));
+  private Map<String, RemoteToolEndpointHandler> handlersByReference() {
+    Map<String, RemoteToolEndpointHandler> result = new LinkedHashMap<>();
+    for (RemoteToolEndpointHandler handler : endpointHandlers) {
+      if (handler == null) {
+        throw new IllegalStateException("远程端点处理器不能为空");
+      }
+      String endpointType = handler.endpointType();
+      if (!StringUtils.hasText(endpointType)) {
+        throw new IllegalStateException("远程端点处理器类型名称不能为空: " + handler.getClass().getName());
+      }
+      Set<String> references = handler.references();
+      if (references == null) {
+        throw new IllegalStateException(endpointType + " 端点处理器返回了 null 引用集合");
+      }
+      for (String reference : references) {
+        if (!StringUtils.hasText(reference)) {
+          throw new IllegalStateException(endpointType + " 端点 ref 不能为空");
+        }
+        RemoteToolEndpointHandler previous = result.putIfAbsent(reference, handler);
+        if (previous != null) {
+          throw new IllegalStateException("远程端点 ref=" + reference + " 同时由 "
+              + previous.endpointType() + " 和 " + endpointType + " 处理");
+        }
+      }
+    }
+    return result;
+  }
+
+  private static void validateReferences(
+      List<ToolRegistration> registrations,
+      Map<String, RemoteToolEndpointHandler> handlers) {
+    Set<String> toolNames = new LinkedHashSet<>();
+    for (ToolRegistration registration : registrations) {
+      toolNames.add(registration.name());
+    }
+    handlers.forEach((reference, handler) -> {
+      if (!toolNames.contains(reference)) {
+        throw new IllegalStateException(
+            handler.endpointType() + " 端点 ref=" + reference + ": 没有对应注解工具");
+      }
+    });
   }
 
   private ToolRegistration toRegistration(Object target, Method method) {
@@ -126,7 +165,7 @@ public final class McpToolScanner {
         schemaGenerator.forMethod(method),
         arguments -> invoke(target, invocable, method.getParameters(), arguments),
         hints,
-        ToolOrigin.local(AopUtils.getTargetClass(target).getName()));
+        Tool.Type.LOCAL);
   }
 
   private Object invoke(Object target, Method method, Parameter[] parameters, Map<String, Object> arguments)

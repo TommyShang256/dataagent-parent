@@ -5,11 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.annotation.ToolParam;
-import ai.opencode.mcp.api.ToolInvocationContext;
-import ai.opencode.mcp.api.ToolOrigin;
 import ai.opencode.mcp.autoconfigure.McpFabricProperties;
 import ai.opencode.mcp.scanner.McpToolScanner;
-import ai.opencode.mcp.scanner.RemoteToolEndpointBinder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -33,7 +30,13 @@ import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-class RemoteToolEndpointBinderTest {
+/**
+ * 验证 API Fabric 与 CSE 端点处理器的完整请求映射行为。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
+class RemoteToolEndpointHandlerTest {
 
   private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
@@ -44,17 +47,17 @@ class RemoteToolEndpointBinderTest {
     var tools = scan(properties, capture, new ProxyTools());
 
     var remote = tools.stream().filter(tool -> tool.name().equals("create_order")).findFirst().orElseThrow();
-    assertThat(remote.origin().kind()).isEqualTo(ToolOrigin.Kind.API_FABRIC);
-    var context = new ToolInvocationContext(Map.of(
+    assertThat(remote.type()).isEqualTo(Tool.Type.API_FABRIC);
+    Map<String, List<String>> headers = Map.of(
         "Authorization", List.of("Bearer one", "Bearer two"),
         "x-biz-mode", List.of("inbound"),
-        "Host", List.of("attacker")));
+        "Host", List.of("attacker"));
     var result = remote.invoker().invoke(Map.of(
         "tenantId", "tenant/a",
         "tags", List.of("new", "priority"),
         "bizMode", "preview",
         "customerId", "C-1",
-        "lines", List.of(Map.of("sku", "SKU-1", "quantity", 2, "price", new BigDecimal("3.50")))), context);
+        "lines", List.of(Map.of("sku", "SKU-1", "quantity", 2, "price", new BigDecimal("3.50")))), headers);
 
     assertThat(result).isEqualTo(new OrderResponse("O-1", "created"));
     assertThat(capture.method).isEqualTo(HttpMethod.POST);
@@ -73,7 +76,7 @@ class RemoteToolEndpointBinderTest {
     var tool = scan(validProperties(), capture, new ProxyTools()).stream()
         .filter(item -> item.name().equals("reserve_inventory")).findFirst().orElseThrow();
 
-    assertThat(tool.origin().kind()).isEqualTo(ToolOrigin.Kind.SERVER_COMB);
+    assertThat(tool.type()).isEqualTo(Tool.Type.CSE);
     assertThat(tool.invoker().invoke(Map.of("warehouseId", "W 1", "sku", "SKU-1")))
         .isEqualTo(List.of("reserved", "SKU-1"));
     assertThat(capture.uri.toString()).isEqualTo("cse://inventory-service/warehouses/W%201/reservations");
@@ -87,7 +90,7 @@ class RemoteToolEndpointBinderTest {
     var local = tools.stream().filter(tool -> tool.name().equals("echo")).findFirst().orElseThrow();
     var remote = tools.stream().filter(tool -> tool.name().equals("create_order")).findFirst().orElseThrow();
 
-    assertThat(local.origin().kind()).isEqualTo(ToolOrigin.Kind.LOCAL);
+    assertThat(local.type()).isEqualTo(Tool.Type.LOCAL);
     assertThat(local.invoker().invoke(Map.of("message", "ok"))).isEqualTo("ok");
     assertThatThrownBy(() -> remote.invoker().invoke(Map.of(
         "tenantId", "T", "tags", List.of(), "bizMode", "x", "customerId", "C", "lines", List.of())))
@@ -219,8 +222,12 @@ class RemoteToolEndpointBinderTest {
     var definition = new RootBeanDefinition(bean.getClass());
     definition.setInstanceSupplier(() -> bean);
     factory.registerBeanDefinition("tools", definition);
-    var provider = (RemoteToolWebClientProvider) origin -> WebClient.builder().exchangeFunction(capture).build();
-    return new McpToolScanner(factory, mapper, new RemoteToolEndpointBinder(properties, mapper, provider)).scan();
+    RemoteToolWebClientProvider provider =
+        origin -> WebClient.builder().exchangeFunction(capture).build();
+    List<RemoteToolEndpointHandler> handlers = List.of(
+        new ApiFabricToolEndpointHandler(properties, mapper, provider),
+        new CseToolEndpointHandler(properties, mapper, provider));
+    return new McpToolScanner(factory, mapper, handlers).scan();
   }
 
   private static ai.opencode.mcp.api.ToolRegistration tool(

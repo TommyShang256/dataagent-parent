@@ -6,11 +6,31 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/** 将 Spring Bean 方法暴露为 MCP 工具。 */
+/**
+ * 将 Spring Bean 方法声明为 MCP 工具。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface Tool {
+
+  /** 工具在启动绑定完成后的执行类别。 */
+  enum Type {
+    /** 执行注解方法体的本地工具。 */
+    LOCAL,
+
+    /** 调用 API Fabric HTTP 端点的远程工具。 */
+    API_FABRIC,
+
+    /** 调用 CSE 服务端点的远程工具。 */
+    CSE,
+
+    /** 由自定义远程端点处理器绑定的工具。 */
+    CUSTOM
+  }
 
   /**
    * 获取工具名称；空字符串表示使用 Java 方法名。

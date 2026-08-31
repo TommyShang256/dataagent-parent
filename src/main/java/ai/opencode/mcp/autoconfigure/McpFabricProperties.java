@@ -10,14 +10,16 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
-/** MCP starter 的类型安全配置属性。 */
+/**
+ * 承载 MCP starter 及远程端点的类型安全配置。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 @ConfigurationProperties("opencode.mcp")
 @Getter
 @Setter
 public class McpFabricProperties {
-
-  /** 创建使用默认值的 MCP 配置属性。 */
-  public McpFabricProperties() {}
 
   /**
    * MCP starter 是否启用。
@@ -176,9 +178,6 @@ public class McpFabricProperties {
   @Setter
   public static final class ApiFabric {
 
-    /** 创建空的 API Fabric 配置。 */
-    public ApiFabric() {}
-
     /**
      * API Fabric 公共基础 URL。
      *
@@ -221,9 +220,6 @@ public class McpFabricProperties {
   @Setter
   public static final class Cse {
 
-    /** 创建空的 CSE 配置。 */
-    public Cse() {}
-
     /**
      * 按工具引用索引的 CSE 端点。
      *
@@ -249,9 +245,6 @@ public class McpFabricProperties {
   @Getter
   @Setter
   public abstract static class Endpoint {
-
-    /** 创建空的端点公共配置。 */
-    public Endpoint() {}
 
     /**
      * 下游 HTTP 方法。
@@ -315,9 +308,6 @@ public class McpFabricProperties {
   @Setter
   public static final class ApiFabricEndpoint extends Endpoint {
 
-    /** 创建空的 API Fabric 端点配置。 */
-    public ApiFabricEndpoint() {}
-
     /**
      * API Fabric 相对路径模板。
      *
@@ -340,9 +330,6 @@ public class McpFabricProperties {
   @Setter
   public static final class CseEndpoint extends Endpoint {
 
-    /** 创建空的 CSE 端点配置。 */
-    public CseEndpoint() {}
-
     /**
      * 完整 CSE URI 模板。
      *
@@ -364,9 +351,6 @@ public class McpFabricProperties {
   @Getter
   @Setter
   public static final class Headers {
-
-    /** 创建空的 Header 映射配置。 */
-    public Headers() {}
 
     /**
      * 业务 Header 下游名称到工具参数名称的映射。

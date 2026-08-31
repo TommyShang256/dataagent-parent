@@ -3,11 +3,12 @@ package ai.opencode.mcp.autoconfigure;
 import ai.opencode.mcp.audit.Slf4jToolAuditLogger;
 import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
-import ai.opencode.mcp.scanner.RemoteToolEndpointBinder;
+import ai.opencode.mcp.remote.ApiFabricToolEndpointHandler;
+import ai.opencode.mcp.remote.CseToolEndpointHandler;
+import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
 import ai.opencode.mcp.remote.ServletToolContextExtractor;
 import ai.opencode.mcp.scanner.McpToolScanner;
-import ai.opencode.mcp.scanner.ToolEndpointBinder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
@@ -15,6 +16,8 @@ import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
+
+import java.util.List;
 
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -27,16 +30,18 @@ import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.reactive.function.client.WebClient;
 
-/** 装配 Servlet MCP Server、工具目录和远程工具调用基础设施。 */
+/**
+ * 装配 Servlet MCP Server、工具目录和远程工具调用基础设施。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @ConditionalOnClass({McpServer.class, ServletRegistrationBean.class})
 @ConditionalOnProperty(prefix = "opencode.mcp", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(McpFabricProperties.class)
 public class McpFabricAutoConfiguration {
-
-  /** 创建 MCP starter 自动配置。 */
-  public McpFabricAutoConfiguration() {}
 
   @Bean
   @ConditionalOnMissingBean
@@ -97,14 +102,21 @@ public class McpFabricAutoConfiguration {
   @ConditionalOnMissingBean
   RemoteToolWebClientProvider remoteToolWebClientProvider() {
     WebClient client = WebClient.builder().build();
-    return originKind -> client;
+    return type -> client;
   }
 
   @Bean
-  @ConditionalOnMissingBean
-  ToolEndpointBinder toolEndpointBinder(
+  @ConditionalOnMissingBean(name = ApiFabricToolEndpointHandler.BEAN_NAME)
+  ApiFabricToolEndpointHandler apiFabricToolEndpointHandler(
       McpFabricProperties properties, ObjectMapper objectMapper, RemoteToolWebClientProvider provider) {
-    return new RemoteToolEndpointBinder(properties, objectMapper, provider);
+    return new ApiFabricToolEndpointHandler(properties, objectMapper, provider);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean(name = CseToolEndpointHandler.BEAN_NAME)
+  CseToolEndpointHandler cseToolEndpointHandler(
+      McpFabricProperties properties, ObjectMapper objectMapper, RemoteToolWebClientProvider provider) {
+    return new CseToolEndpointHandler(properties, objectMapper, provider);
   }
 
   @Bean
@@ -112,8 +124,8 @@ public class McpFabricAutoConfiguration {
   McpToolScanner mcpToolScanner(
       ConfigurableListableBeanFactory beanFactory,
       ObjectMapper objectMapper,
-      ToolEndpointBinder endpointBinder) {
-    return new McpToolScanner(beanFactory, objectMapper, endpointBinder);
+      List<RemoteToolEndpointHandler> endpointHandlers) {
+    return new McpToolScanner(beanFactory, objectMapper, endpointHandlers);
   }
 
   @Bean

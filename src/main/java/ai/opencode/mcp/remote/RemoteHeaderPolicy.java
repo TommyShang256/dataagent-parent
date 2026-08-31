@@ -3,7 +3,12 @@ package ai.opencode.mcp.remote;
 import java.util.Locale;
 import java.util.Set;
 
-/** 传输上下文提取与下游请求共用的 Header 安全规则。 */
+/**
+ * 提供传输上下文提取与下游请求共用的 Header 安全规则。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 public final class RemoteHeaderPolicy {
 
   private static final Set<String> EXCLUDED = Set.of(

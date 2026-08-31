@@ -1,11 +1,11 @@
 package ai.opencode.mcp.registry;
 
 import ai.opencode.mcp.api.ToolHints;
-import ai.opencode.mcp.api.ToolInvocationContext;
 import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
+import ai.opencode.mcp.remote.ServletToolContextExtractor;
 import ai.opencode.mcp.scanner.McpToolScanner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.server.McpServerFeatures;
@@ -27,7 +27,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 
-/** 在 Spring 创建全部单例后构建不可变的 MCP 工具目录。 */
+/**
+ * 在 Spring 创建全部单例后构建并发布不可变的 MCP 工具目录。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 @Slf4j
 @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 public final class McpToolRegistry implements SmartInitializingSingleton {
@@ -125,20 +130,20 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
          */
         @Override
         public Object invoke(Map<String, Object> arguments) throws Exception {
-          return McpToolRegistry.this.invoke(registration, arguments, ToolInvocationContext.EMPTY);
+          return McpToolRegistry.this.invoke(registration, arguments, Map.of());
         }
 
         /**
-         * 使用当前请求上下文执行工具并记录审计事件。
+         * 使用当前请求 Header 执行工具并记录审计事件。
          *
          * @param arguments 工具参数
-         * @param context 当前请求的调用上下文
+         * @param headers 当前请求的不可变多值 Header
          * @return 工具执行结果
          * @throws Exception 工具执行失败时抛出
          */
         @Override
-        public Object invoke(Map<String, Object> arguments, ToolInvocationContext context) throws Exception {
-          return McpToolRegistry.this.invoke(registration, arguments, context);
+        public Object invoke(Map<String, Object> arguments, Map<String, List<String>> headers) throws Exception {
+          return McpToolRegistry.this.invoke(registration, arguments, headers);
         }
       });
       ToolRegistration existing = normalized.putIfAbsent(audited.name(), audited);
@@ -160,10 +165,12 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
   }
 
   private Object invoke(
-      ToolRegistration registration, Map<String, Object> arguments, ToolInvocationContext context) throws Exception {
+      ToolRegistration registration,
+      Map<String, Object> arguments,
+      Map<String, List<String>> headers) throws Exception {
     long started = System.nanoTime();
     try {
-      Object result = registration.invoker().invoke(arguments, context);
+      Object result = registration.invoker().invoke(arguments, headers);
       audit(registration, ToolAuditEvent.Operation.INVOKE, started, arguments, result, null);
       return result;
     } catch (Exception exception) {
@@ -189,18 +196,20 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
     return McpServerFeatures.SyncToolSpecification.builder()
         .tool(tool)
         .callHandler((exchange, request) -> call(
-            registration, request.arguments(), exchange == null ? ToolInvocationContext.EMPTY : context(exchange.transportContext())))
+            registration, request.arguments(), exchange == null ? Map.of() : headers(exchange.transportContext())))
         .build();
   }
 
   McpSchema.CallToolResult call(ToolRegistration registration, Map<String, Object> arguments) {
-    return call(registration, arguments, ToolInvocationContext.EMPTY);
+    return call(registration, arguments, Map.of());
   }
 
   McpSchema.CallToolResult call(
-      ToolRegistration registration, Map<String, Object> arguments, ToolInvocationContext context) {
+      ToolRegistration registration,
+      Map<String, Object> arguments,
+      Map<String, List<String>> headers) {
     try {
-      Object result = registration.invoker().invoke(arguments == null ? Map.of() : arguments, context);
+      Object result = registration.invoker().invoke(arguments == null ? Map.of() : arguments, headers);
       if (result instanceof McpSchema.CallToolResult callToolResult) {
         return callToolResult;
       }
@@ -217,16 +226,26 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
     }
   }
 
-  @SuppressWarnings("unchecked")
-  private static ToolInvocationContext context(io.modelcontextprotocol.common.McpTransportContext transportContext) {
+  private static Map<String, List<String>> headers(
+      io.modelcontextprotocol.common.McpTransportContext transportContext) {
     if (transportContext == null) {
-      return ToolInvocationContext.EMPTY;
+      return Map.of();
     }
-    Object value = transportContext.get(ToolInvocationContext.TRANSPORT_HEADERS_KEY);
+    Object value = transportContext.get(ServletToolContextExtractor.class.getName());
     if (!(value instanceof Map<?, ?> map)) {
-      return ToolInvocationContext.EMPTY;
+      return Map.of();
     }
-    return new ToolInvocationContext((Map<String, List<String>>) map);
+    Map<String, List<String>> result = new LinkedHashMap<>();
+    map.forEach((name, values) -> {
+      if (name instanceof String headerName && values instanceof List<?> list) {
+        List<String> headerValues = list.stream()
+            .filter(String.class::isInstance)
+            .map(String.class::cast)
+            .toList();
+        result.put(headerName, headerValues);
+      }
+    });
+    return Collections.unmodifiableMap(result);
   }
 
   private void audit(
@@ -241,7 +260,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
         operation,
         exception == null ? ToolAuditEvent.Outcome.SUCCESS : ToolAuditEvent.Outcome.FAILURE,
         registration.name(),
-        registration.origin(),
+        registration.type(),
         Duration.ofNanos(System.nanoTime() - started),
         arguments,
         result,

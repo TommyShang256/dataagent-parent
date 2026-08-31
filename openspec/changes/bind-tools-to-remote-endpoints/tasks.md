@@ -14,7 +14,7 @@
 
 ## 3. 启动绑定与远程调用
 
-- [x] 3.1 将注解工具名称和端点属性编译为不可变的 API Fabric/CSE 调用计划，同时保持未匹配工具为本地调用且通用 `RemoteToolClient` 注册不变；通过 scanner 测试确认远程方法体不会执行，且 origin 元数据正确
+- [x] 3.1 将注解工具名称和端点属性编译为不可变的 API Fabric/CSE 调用计划，同时保持未匹配工具为本地调用；通过 scanner 测试确认远程方法体不会执行，且最终类型元数据正确
 - [x] 3.2 在 MCP Server 注册前验证完整绑定集合，包括跨类别重复 ref、未知 ref、URI 占位符没有同名工具参数、Query/业务 Header 引用未知参数或发生位置冲突、重复下游名称及非法 method/URI；通过测试确认每个错误都包含类别、ref 和问题参数，且不会发布部分目录
 - [x] 3.3 从 `path-template` 或 CSE `uri-template` 占位符自动识别同名 Path 参数，使用 `base-url` 和模板构建 API Fabric URI，并保留展开后的完整 CSE URI；通过测试验证无需 Path 配置、path 编码、method 选择、基础路径处理、占位参数缺失，以及 `cse://service-name/...` 原样传给 client provider
 - [x] 3.4 从工具参数映射 Query 参数和 Agent 提供的业务 Header，包括目标重命名、可选值省略、Jackson 标量转换和集合重复值；通过捕获的 WebClient 请求确认每个参数只出现在算法确定的位置
@@ -35,3 +35,28 @@
 - [x] 5.1 安装更新后的 starter，并使用 Java 21 release 编译分别对 `dataagent-mcp` 和 `dataagent-mcp-test` 执行 clean verification；确认全部单元、context、请求捕获、Schema 和 MCP 侧测试通过，且不存在陈旧 target class
 - [x] 5.2 检查最终 diff、公开 API、配置元数据、Server capabilities 和构建 JAR；确认不存在固定 Header 功能、multipart 实现、Resource/Prompt capability、运行时修改 API、CSE URI 改写、无关变更或陈旧包引用
 - [x] 5.3 执行严格 OpenSpec 校验，并将每个场景对应到通过的自动化测试或明确交付的文档检查
+
+## 6. 端点处理 SPI 重构
+
+- [x] 6.1 增加公共远程端点处理接口，由 scanner 集中执行目录级匹配、未知引用及跨实现重复引用校验；通过测试确认未匹配工具仍执行本地方法
+- [x] 6.2 将 API Fabric 和 CSE 提升为两个独立默认实现，并抽取共享远程调用计划组件；通过既有请求映射测试确认 URI、参数、Header、Body、响应和错误行为不变
+- [x] 6.3 调整自动配置，使 API Fabric 与 CSE 默认实现可以分别替换且互不影响；通过上下文测试覆盖只替换任一实现及增加扩展实现
+- [x] 6.4 更新 README 和公开 API 文档，执行 starter、消费端及严格 OpenSpec 验证，并将最新代码加入 Git 暂存区
+- [x] 6.5 删除未上线的旧 `RemoteToolEndpointBinder` 兼容适配器，将测试直接切换到公共 handler SPI 和 scanner，并重新完成全量验证
+
+## 7. 结构精简与源码文档
+
+- [x] 7.1 将端点目录汇总和绑定直接收敛到 scanner，删除仅转发的 `ToolEndpointBinder`、`CompositeToolEndpointBinder` 与 `ToolMethodRegistration`；通过目录校验、扩展实现和远程请求测试确认行为不变
+- [x] 7.2 删除单字段响应包装类型及无逻辑显式构造器，检查生产源码类型和方法数量，确保不通过混合职责换取表面精简
+- [x] 7.3 为 starter 与消费端全部 Java 源文件的顶层类、接口、record、enum 或注解声明补充职责说明、`@author beining.shang` 和 `@since 2026-08-31`，并执行 JavaDoc、全量测试、严格 OpenSpec 和 Git 暂存验证
+
+## 8. 统一工具声明路径
+
+- [x] 8.1 删除未被消费端使用的 `RemoteToolClient` 公开 API、scanner 分支及专用测试，将自动配置测试改为仅使用 `@Tool` 工具并确认固定目录、审计和调用行为不变
+- [x] 8.2 更新 README、设计和验证材料，执行 starter 与消费端全量测试、JavaDoc、严格 OpenSpec 校验和 Git 暂存检查
+
+## 9. 来源与调用上下文内联
+
+- [x] 9.1 在 `Tool` 内声明最终工具类型枚举，以类型字段替代 `ToolOrigin`，同步 scanner、端点处理器、WebClient provider、审计事件和测试，并删除重复的来源标识
+- [x] 9.2 将只承载请求 Header 的 `ToolInvocationContext` 内联为不可变多值 Header 映射，保持函数式 `ToolInvoker`、审计包装、Header 透传和请求隔离行为，并删除独立上下文类型
+- [x] 9.3 更新 README、设计和验证材料，执行 starter 与消费端全量测试、JavaDoc、严格 OpenSpec 校验、结构计数和 Git 暂存检查

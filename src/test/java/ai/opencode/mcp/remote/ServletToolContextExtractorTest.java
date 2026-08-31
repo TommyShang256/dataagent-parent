@@ -3,12 +3,17 @@ package ai.opencode.mcp.remote;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import ai.opencode.mcp.api.ToolInvocationContext;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+/**
+ * 验证 Servlet 请求 Header 上下文的提取与过滤行为。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 class ServletToolContextExtractorTest {
 
   @Test
@@ -23,7 +28,7 @@ class ServletToolContextExtractorTest {
     request.addHeader("Mcp-Session-Id", "session");
 
     var context = new ServletToolContextExtractor().extract(request);
-    var headers = (Map<String, List<String>>) context.get(ToolInvocationContext.TRANSPORT_HEADERS_KEY);
+    var headers = (Map<String, List<String>>) context.get(ServletToolContextExtractor.class.getName());
 
     assertThat(headers).containsEntry("Authorization", List.of("one", "two"))
         .containsEntry("X-Trace-Id", List.of("trace"));

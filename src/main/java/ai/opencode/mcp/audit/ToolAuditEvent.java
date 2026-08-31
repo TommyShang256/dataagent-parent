@@ -1,6 +1,6 @@
 package ai.opencode.mcp.audit;
 
-import ai.opencode.mcp.api.ToolOrigin;
+import ai.opencode.mcp.annotation.Tool;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -15,18 +15,20 @@ import java.util.Map;
  * @param operation 审计操作
  * @param outcome 操作结果
  * @param toolName 工具名称
- * @param origin 工具来源
+ * @param type 工具执行类别
  * @param duration 操作耗时
  * @param arguments 调用参数
  * @param result 调用结果
  * @param errorType 异常类型名称
+ * @author beining.shang
+ * @since 2026-08-31
  */
 public record ToolAuditEvent(
     Instant timestamp,
     Operation operation,
     Outcome outcome,
     String toolName,
-    ToolOrigin origin,
+    Tool.Type type,
     Duration duration,
     Map<String, Object> arguments,
     Object result,
@@ -39,7 +41,7 @@ public record ToolAuditEvent(
    * @param operation 审计操作
    * @param outcome 操作结果
    * @param toolName 工具名称
-   * @param origin 工具来源
+   * @param type 工具执行类别
    * @param duration 操作耗时
    * @param arguments 调用参数
    * @param result 调用结果

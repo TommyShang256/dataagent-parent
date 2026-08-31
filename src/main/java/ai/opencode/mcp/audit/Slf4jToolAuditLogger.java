@@ -2,15 +2,17 @@ package ai.opencode.mcp.audit;
 
 import lombok.extern.slf4j.Slf4j;
 
-/** 使用 SLF4J 参数化日志记录完整的 MCP 工具审计事件。 */
+/**
+ * 使用 SLF4J 参数化日志记录完整的 MCP 工具审计事件。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 @Slf4j(topic = "ai.opencode.mcp.audit.tool")
 public final class Slf4jToolAuditLogger implements ToolAuditLogger {
 
   /** 工具审计专用 Logger 名称。 */
   public static final String LOGGER_NAME = "ai.opencode.mcp.audit.tool";
-
-  /** 创建 SLF4J 工具审计记录器。 */
-  public Slf4jToolAuditLogger() {}
 
   /**
    * 使用独立 SLF4J Logger 记录工具审计事件。
@@ -20,14 +22,13 @@ public final class Slf4jToolAuditLogger implements ToolAuditLogger {
    */
   @Override
   public void record(ToolAuditEvent event) {
-    String message = "MCP tool audit operation={} outcome={} tool={} origin={} source={} durationMs={} "
+    String message = "MCP tool audit operation={} outcome={} tool={} type={} durationMs={} "
         + "arguments={} result={} errorType={}";
     Object[] arguments = new Object[] {
       event.operation(),
       event.outcome(),
       event.toolName(),
-      event.origin().kind(),
-      event.origin().sourceId(),
+      event.type(),
       event.duration().toMillis(),
       event.arguments(),
       event.result(),

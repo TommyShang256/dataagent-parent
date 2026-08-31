@@ -11,7 +11,7 @@
 - 在启动时把配置和注解方法元数据编译为不可变的远程调用计划。
 - 保持每个 Body 字段都是独立描述的工具参数，使 Agent 能理解并生成这些参数。
 - 在类型、配置、Schema 和审计边界上区分 Agent 提供的业务 Header 与请求级透传 Header。
-- 注解工具未匹配配置端点时，保留现有本地工具行为和通用 `RemoteToolClient` 行为。
+- 注解工具未匹配配置端点时，保留现有本地工具行为。
 - 在支持远程调用上下文的同时，保持公开的单参数 `ToolInvoker` 函数式契约源码兼容。
 
 **非目标：**
@@ -62,13 +62,13 @@ Query 和业务 Header 映射采用 `下游名称: 工具参数名称`。Path �
 
 scanner 继续从注解方法派生工具名称、描述、hints、输入 Schema、参数名称、泛型参数类型和声明返回类型。构建本地元数据后，binder 使用最终工具名称查询端点目录：
 
-- 未匹配：保留反射调用的本地 invoker 和 `LOCAL` origin；
-- 匹配 API Fabric：安装编译后的 HTTP invoker，并使用 `API_FABRIC` origin；
-- 匹配 CSE：安装编译后的 HTTP invoker；为兼容现有 API，继续使用 `SERVER_COMB` origin kind。
+- 未匹配：保留反射调用的本地 invoker，并将最终类型设为 `Tool.Type.LOCAL`；
+- 匹配 API Fabric：安装编译后的 HTTP invoker，并将最终类型设为 `Tool.Type.API_FABRIC`；
+- 匹配 CSE：安装编译后的 HTTP invoker，并将最终类型设为 `Tool.Type.CSE`。
 
-匹配远程端点后绝不执行注解方法体。通用 `RemoteToolClient` 路径保持独立且不变。
+匹配远程端点后绝不执行注解方法体。工具只通过 `@Tool` 声明，scanner 不再同时支持第二套编程式工具目录。
 
-备选方案：把配置端点建模为自动生成的 `RemoteToolClient` Bean。不采用，因为这类 client 自带发现得到的 Schema，而本功能需要使用注解 Java 签名作为 Agent 可见契约。
+备选方案：另外保留一套自带 Schema 和执行器的编程式工具客户端。不采用，因为当前没有实际消费场景，且会引入第二套工具定义与扫描流程。
 
 ### 3. 模板识别 Path 并由剩余参数自动生成 Body
 
@@ -103,11 +103,19 @@ Header 名称按不区分大小写的方式比较。入站 Header 与业务 Head
 
 Servlet transport 安装 `McpTransportContextExtractor<HttpServletRequest>`。每个 HTTP 请求将系统排除集合之外的 Header 及其全部值复制到不可变、不区分大小写的多值结构，并保存在 starter 自有的 transport context key 下。端点 invoker 再移除当前调用计划的业务 Header 同名项，将其余值原样加入下游请求。
 
-`ToolInvoker` 保持函数式接口和现有抽象方法，同时增加默认的 context-aware overload。registry 处理 MCP 调用时，将 `exchange.transportContext()` 转换为小型 `ToolInvocationContext` 并传给 invoker。现有本地 invoker 和应用 invoker 仍只需实现原方法；编译后的远程 invoker 覆写 context-aware 方法。registry 的审计包装必须同时保留两种调用方式，不能丢失 context。
+`ToolInvoker` 保持函数式接口和现有抽象方法，同时增加默认的 Header-aware overload。registry 处理 MCP 调用时，从 `exchange.transportContext()` 取得不可变的多值 Header `Map` 并传给 invoker。现有本地 invoker 和应用 invoker 仍只需实现原方法；编译后的远程 invoker 覆写 Header-aware 方法。registry 的审计包装必须同时保留两种调用方式，不能丢失 Header。请求上下文当前只承载 Header，因此不额外声明 `ToolInvocationContext` 包装类型；提取器类名直接作为 starter 内部 transport context key，不再公开额外常量。
 
 该方案避免 ThreadLocal、session 级 Header 缓存以及跨请求泄漏。BFF/client 必须在每次 `tools/call` HTTP 请求中携带透传 Header；initialize 请求中的 Header 不会被复用。
 
 备选方案：使用 ThreadLocal 保存 Header。不采用，因为响应式客户端执行过程中不可靠，也更难证明请求隔离。
+
+### 5.1 工具绑定类别内联到 Tool
+
+`ToolOrigin` 同时保存类别与 `sourceId`，但远程 `sourceId` 与 `@Tool.name`/端点 ref 重复，本地类名也只用于日志，不参与路由或调用。删除该包装类型，在 `Tool` 注解类型中声明嵌套枚举 `Type`，并由 `ToolRegistration` 保存扫描和端点绑定后解析出的最终类型。
+
+`Tool.Type` 包含 `LOCAL`、`API_FABRIC`、`CSE` 和 `CUSTOM`。前三项对应 starter 内置路径；`CUSTOM` 仅供公共 `RemoteToolEndpointHandler` 扩展实现标识自定义远程类别。类型不作为 `@Tool` 的可配置注解属性，避免注解值与端点配置发生冲突。审计事件只记录最终类型，不再记录重复的来源标识；WebClient provider 直接按最终类型选择客户端。
+
+备选方案：在 `@Tool` 上公开 `type` 属性。不采用，因为同一个注解工具是否远程及远程类别由配置绑定结果决定，手工属性会形成第二个不一致的事实来源。
 
 ### 6. API Fabric 和 CSE 共用一条 WebClient 请求管线
 
@@ -118,6 +126,22 @@ API Fabric URI 先组合已校验的基础 URL 与 path template，再展开 pat
 成功响应使用已配置的 `ObjectMapper`，按照方法解析后的泛型返回类型读取并转换 JSON。String 和 void-like 返回值单独处理。`WebClient` 状态异常、connector 错误、超时、URI 错误和转换错误通过现有 MCP error adapter 返回，同时保留原始调用审计失败信息。
 
 备选方案：使用面向 Servlet 的 REST client。不采用，因为 API Fabric 与 CSE 已明确要求使用 WebClient，且 CSE 需要可替换的 connector 边界。
+
+### 6.1 端点类别使用公共 SPI 并可独立替换
+
+增加公共 `RemoteToolEndpointHandler` 接口。每个实现负责声明自己的类别名称和端点引用，并把匹配的注解工具编译为远程 `ToolRegistration`。默认提供 `ApiFabricToolEndpointHandler` 和 `CseToolEndpointHandler` 两个实现；URI 组合、类别专属配置校验和最终工具类型选择由各自实现负责。
+
+`McpToolScanner` 汇总全部 handler 的引用，统一检查跨实现重复 ref、配置 ref 没有对应注解工具等目录级约束，再把匹配工具交给唯一 handler；没有匹配项的工具保持本地调用。请求参数划分、Header、Body、WebClient 执行和响应转换下沉到包内共享的调用计划工厂，避免两个 handler 重复实现协议行为。
+
+项目尚未上线，不保留原先同时处理两类端点的 `RemoteToolEndpointBinder` 兼容适配器；测试和自动配置直接使用 scanner 及公共 handler SPI，避免形成重复入口。
+
+自动配置按具体默认实现分别使用缺失条件，而不是对公共接口整体使用缺失条件。因此应用替换 API Fabric handler 时，默认 CSE handler 仍会创建，反之亦然；应用也可以增加新的 handler 类型，并自动参与组合绑定及重复 ref 校验。
+
+为减少没有独立策略价值的类型，scanner 直接接收全部 `RemoteToolEndpointHandler` 并完成目录汇总、未知 ref 校验和单工具绑定。不再保留只做转发的 `ToolEndpointBinder`、`CompositeToolEndpointBinder` 和仅包装 Method/Registration 的 `ToolMethodRegistration`。handler 的绑定方法直接接收 Java `Method` 与扫描得到的 `ToolRegistration`。这一调整保持端点 SPI 可替换性，同时减少三种生产类型和一层调用链。
+
+代码结构遵循“存在独立职责才保留类型或方法”的原则：删除单字段远程响应包装类型和无逻辑显式构造器，但不把请求编译、Schema、审计等不同职责机械合并。所有 Java 源文件的顶层类型声明使用说明其职责的 JavaDoc，并统一标注 `@author beining.shang` 与 `@since 2026-08-31`。
+
+备选方案：保留一个同时处理 API Fabric 和 CSE 的 binder，仅替换 WebClient provider。不采用，因为无法单独替换某一端点类别的配置解释、校验和 URI 构造。备选方案：对公共接口使用单一 `@ConditionalOnMissingBean`。不采用，因为任意自定义实现都会错误地关闭其他默认类别。
 
 ### 7. Server 注册前完成全部校验
 
@@ -134,6 +158,7 @@ starter 级测试覆盖配置绑定、校验诊断、context 提取、审计隔�
 ## Risks / Trade-offs
 
 - [默认 WebClient connector 通常拒绝 `cse` URI] → 保持 URI 不变，并要求 CSE 部署提供可替换的 provider/connector；使用请求捕获客户端验证该边界。
+- [公共 handler 允许应用增加端点类别，可能产生跨实现 ref 冲突] → 由 scanner 在目录发布前集中检查，禁止按 Bean 顺序静默覆盖。
 - [context-aware 调用重载可能被包装器意外绕过] → 为 registry 审计包装和实际 MCP call handler 中的远程调用增加契约测试。
 - [业务 Header 参数可能包含敏感值，当前审计会记录 arguments] → 保留现有已记录的审计契约，明确排除透传值，并建议应用对敏感业务参数进行审计脱敏。
 - [默认透传会把调用方提供的大多数 Header 带到下游] → 明确该行为只适用于受信任的 BFF 调用链，固定排除连接、内容协商和 MCP 协议 Header，并确保透传值不进入审计。
@@ -143,7 +168,7 @@ starter 级测试覆盖配置绑定、校验诊断、context 提取、审计隔�
 
 ## Migration Plan
 
-1. 增加 WebClient 支持、端点属性、配置元数据、请求 context 和绑定组件；未配置端点时，现有应用继续使用本地工具和通用远程工具。
+1. 增加 WebClient 支持、端点属性、配置元数据、请求 context 和绑定组件；未配置端点时，现有应用继续使用本地注解工具。
 2. 使用现有注解工具名称作为 key，增加 API Fabric 或 CSE 端点配置；应用下次重启后，匹配的注解工具成为远程代理。
 3. 启用 `cse` 引用之前，提供运行环境对应的 WebClient connector/provider。
 4. 验证消费端模块，并确保部署后的每次 MCP 工具调用都携带所需请求 Header。

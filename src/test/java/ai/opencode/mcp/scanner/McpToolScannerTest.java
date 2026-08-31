@@ -8,6 +8,7 @@ import ai.opencode.mcp.annotation.ToolParam;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -17,10 +18,16 @@ import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
+/**
+ * 验证注解工具扫描、参数转换和本地调用行为。
+ *
+ * @author beining.shang
+ * @since 2026-08-31
+ */
 class McpToolScannerTest {
 
   private final McpToolScanner scanner = new McpToolScanner(
-      new DefaultListableBeanFactory(), new ObjectMapper().findAndRegisterModules());
+      new DefaultListableBeanFactory(), new ObjectMapper().findAndRegisterModules(), List.of());
 
   @Test
   void distinguishesMissingAndNullAndCreatesEmptyOptionals() throws Exception {
