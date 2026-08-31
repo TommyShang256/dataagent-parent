@@ -3,7 +3,11 @@ package ai.opencode.mcp.autoconfigure;
 import ai.opencode.mcp.audit.Slf4jToolAuditLogger;
 import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
+import ai.opencode.mcp.remote.RemoteToolEndpointBinder;
+import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
+import ai.opencode.mcp.remote.ServletToolContextExtractor;
 import ai.opencode.mcp.scanner.McpToolScanner;
+import ai.opencode.mcp.scanner.ToolEndpointBinder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
@@ -21,6 +25,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.reactive.function.client.WebClient;
 
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -42,6 +47,7 @@ public class McpFabricAutoConfiguration {
     var builder = HttpServletStreamableServerTransportProvider.builder()
         .jsonMapper(jsonMapper)
         .mcpEndpoint(normalizeEndpoint(properties.getEndpoint()))
+        .contextExtractor(new ServletToolContextExtractor())
         .maxRequestSize(Math.toIntExact(properties.getMaxRequestSize().toBytes()));
     if (properties.getKeepAlive() != null) builder.keepAliveInterval(properties.getKeepAlive());
     return builder.build();
@@ -81,10 +87,25 @@ public class McpFabricAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  RemoteToolWebClientProvider remoteToolWebClientProvider() {
+    var client = WebClient.builder().build();
+    return originKind -> client;
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  ToolEndpointBinder toolEndpointBinder(
+      McpFabricProperties properties, ObjectMapper objectMapper, RemoteToolWebClientProvider provider) {
+    return new RemoteToolEndpointBinder(properties, objectMapper, provider);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   McpToolScanner mcpToolScanner(
       ConfigurableListableBeanFactory beanFactory,
-      ObjectMapper objectMapper) {
-    return new McpToolScanner(beanFactory, objectMapper);
+      ObjectMapper objectMapper,
+      ToolEndpointBinder endpointBinder) {
+    return new McpToolScanner(beanFactory, objectMapper, endpointBinder);
   }
 
   @Bean

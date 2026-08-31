@@ -13,7 +13,9 @@ import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
 import ai.opencode.mcp.remote.RemoteToolClient;
+import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
 import ai.opencode.mcp.scanner.McpToolScanner;
+import ai.opencode.mcp.scanner.ToolEndpointBinder;
 import io.modelcontextprotocol.server.McpSyncServer;
 
 import java.util.List;
@@ -27,6 +29,7 @@ import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.reactive.function.client.WebClient;
 
 class McpFabricAutoConfigurationTest {
 
@@ -131,6 +134,8 @@ class McpFabricAutoConfigurationTest {
       assertThat(context).doesNotHaveBean(McpSyncServer.class);
       assertThat(context).doesNotHaveBean(McpToolScanner.class);
       assertThat(context).doesNotHaveBean(McpToolRegistry.class);
+      assertThat(context).doesNotHaveBean(ToolEndpointBinder.class);
+      assertThat(context).doesNotHaveBean(RemoteToolWebClientProvider.class);
     });
   }
 
@@ -139,6 +144,15 @@ class McpFabricAutoConfigurationTest {
     runner.withPropertyValues("opencode.mcp.endpoint=company-mcp").run(context -> {
       var registration = (ServletRegistrationBean<?>) context.getBean("mcpServletRegistration");
       assertThat(registration.getUrlMappings()).containsExactly("/company-mcp");
+    });
+  }
+
+  @Test
+  void applicationCanReplaceRemoteWebClientProvider() {
+    var custom = (RemoteToolWebClientProvider) origin -> WebClient.builder().build();
+    baseRunner.withBean(RemoteToolWebClientProvider.class, () -> custom).run(context -> {
+      assertThat(context).hasSingleBean(RemoteToolWebClientProvider.class);
+      assertThat(context.getBean(RemoteToolWebClientProvider.class)).isSameAs(custom);
     });
   }
 

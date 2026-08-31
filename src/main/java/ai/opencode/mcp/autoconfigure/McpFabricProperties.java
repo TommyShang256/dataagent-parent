@@ -1,6 +1,8 @@
 package ai.opencode.mcp.autoconfigure;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
@@ -21,6 +23,10 @@ public class McpFabricProperties {
   private Duration keepAlive;
 
   private DataSize maxRequestSize = DataSize.ofMegabytes(16);
+
+  private ApiFabric apiFabric = new ApiFabric();
+
+  private Cse cse = new Cse();
 
   public boolean isEnabled() {
     return enabled;
@@ -76,5 +82,66 @@ public class McpFabricProperties {
 
   public void setMaxRequestSize(DataSize maxRequestSize) {
     this.maxRequestSize = maxRequestSize;
+  }
+
+  public ApiFabric getApiFabric() { return apiFabric; }
+
+  public void setApiFabric(ApiFabric apiFabric) { this.apiFabric = apiFabric == null ? new ApiFabric() : apiFabric; }
+
+  public Cse getCse() { return cse; }
+
+  public void setCse(Cse cse) { this.cse = cse == null ? new Cse() : cse; }
+
+  public static final class ApiFabric {
+    private String baseUrl;
+    private Map<String, ApiFabricEndpoint> endpoints = new LinkedHashMap<>();
+    public String getBaseUrl() { return baseUrl; }
+    public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+    public Map<String, ApiFabricEndpoint> getEndpoints() { return endpoints; }
+    public void setEndpoints(Map<String, ApiFabricEndpoint> endpoints) {
+      this.endpoints = endpoints == null ? new LinkedHashMap<>() : new LinkedHashMap<>(endpoints);
+    }
+  }
+
+  public static final class Cse {
+    private Map<String, CseEndpoint> endpoints = new LinkedHashMap<>();
+    public Map<String, CseEndpoint> getEndpoints() { return endpoints; }
+    public void setEndpoints(Map<String, CseEndpoint> endpoints) {
+      this.endpoints = endpoints == null ? new LinkedHashMap<>() : new LinkedHashMap<>(endpoints);
+    }
+  }
+
+  public abstract static class Endpoint {
+    private String method;
+    private Map<String, String> query = new LinkedHashMap<>();
+    private Headers headers = new Headers();
+    public String getMethod() { return method; }
+    public void setMethod(String method) { this.method = method; }
+    public Map<String, String> getQuery() { return query; }
+    public void setQuery(Map<String, String> query) {
+      this.query = query == null ? new LinkedHashMap<>() : new LinkedHashMap<>(query);
+    }
+    public Headers getHeaders() { return headers; }
+    public void setHeaders(Headers headers) { this.headers = headers == null ? new Headers() : headers; }
+  }
+
+  public static final class ApiFabricEndpoint extends Endpoint {
+    private String pathTemplate;
+    public String getPathTemplate() { return pathTemplate; }
+    public void setPathTemplate(String pathTemplate) { this.pathTemplate = pathTemplate; }
+  }
+
+  public static final class CseEndpoint extends Endpoint {
+    private String uriTemplate;
+    public String getUriTemplate() { return uriTemplate; }
+    public void setUriTemplate(String uriTemplate) { this.uriTemplate = uriTemplate; }
+  }
+
+  public static final class Headers {
+    private Map<String, String> business = new LinkedHashMap<>();
+    public Map<String, String> getBusiness() { return business; }
+    public void setBusiness(Map<String, String> business) {
+      this.business = business == null ? new LinkedHashMap<>() : new LinkedHashMap<>(business);
+    }
   }
 }

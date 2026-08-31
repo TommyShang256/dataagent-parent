@@ -6,4 +6,8 @@ import java.util.Map;
 public interface ToolInvoker {
 
   Object invoke(Map<String, Object> arguments) throws Exception;
+
+  default Object invoke(Map<String, Object> arguments, ToolInvocationContext context) throws Exception {
+    return invoke(arguments);
+  }
 }

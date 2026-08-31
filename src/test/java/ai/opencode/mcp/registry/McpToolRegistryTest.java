@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.opencode.mcp.api.ToolHints;
 import ai.opencode.mcp.api.ToolInvoker;
+import ai.opencode.mcp.api.ToolInvocationContext;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
@@ -16,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
@@ -118,6 +120,49 @@ class McpToolRegistryTest {
 
     assertThat(specification.tool().name()).isEqualTo("echo");
     assertText(result, "through-handler", false);
+  }
+
+  @Test
+  void passesTransportContextThroughHandlerAndAuditWrapperWithoutAuditingHeaders() throws Exception {
+    var received = new AtomicReference<ToolInvocationContext>();
+    ToolInvoker contextAware = new ToolInvoker() {
+      @Override public Object invoke(Map<String, Object> arguments) { return "without-context"; }
+      @Override public Object invoke(Map<String, Object> arguments, ToolInvocationContext context) {
+        received.set(context);
+        return arguments.get("message");
+      }
+    };
+    var events = new ArrayList<ToolAuditEvent>();
+    var registry = registry(List.of(registration("context", contextAware)), new FakeToolServer(), events::add);
+    registry.afterSingletonsInstantiated();
+
+    var first = new ToolInvocationContext(Map.of("Authorization", List.of("first")));
+    assertThat(find(registry, "context").invoker().invoke(Map.of("message", "one"), first)).isEqualTo("one");
+    assertThat(received.get().headers()).containsEntry("Authorization", List.of("first"));
+    assertThat(events.getLast().arguments()).containsOnlyKeys("message");
+
+    var transport = io.modelcontextprotocol.common.McpTransportContext.create(Map.of(
+        ToolInvocationContext.TRANSPORT_HEADERS_KEY, Map.of("Authorization", List.of("second"))));
+    var session = new io.modelcontextprotocol.spec.McpLoggableSession() {
+      @Override public <T> reactor.core.publisher.Mono<T> sendRequest(
+          String method, Object parameters, io.modelcontextprotocol.json.TypeRef<T> typeRef) {
+        return reactor.core.publisher.Mono.empty();
+      }
+      @Override public reactor.core.publisher.Mono<Void> sendNotification(String method, Object parameters) {
+        return reactor.core.publisher.Mono.empty();
+      }
+      @Override public reactor.core.publisher.Mono<Void> closeGracefully() { return reactor.core.publisher.Mono.empty(); }
+      @Override public void close() {}
+      @Override public void setMinLoggingLevel(McpSchema.LoggingLevel level) {}
+      @Override public boolean isNotificationForLevelAllowed(McpSchema.LoggingLevel level) { return true; }
+    };
+    var asyncExchange = new io.modelcontextprotocol.server.McpAsyncServerExchange(
+        "session", session, null, null, transport);
+    var exchange = new io.modelcontextprotocol.server.McpSyncServerExchange(asyncExchange);
+    var result = registry.toSpecification(find(registry, "context")).callHandler().apply(
+        exchange, McpSchema.CallToolRequest.builder("context").arguments(Map.of("message", "two")).build());
+    assertText(result, "two", false);
+    assertThat(received.get().headers()).containsEntry("Authorization", List.of("second"));
   }
 
   private static McpToolRegistry registry(

@@ -1,6 +1,8 @@
 package ai.opencode.mcp.registry;
 
 import ai.opencode.mcp.api.ToolRegistration;
+import ai.opencode.mcp.api.ToolInvocationContext;
+import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.scanner.McpToolScanner;
@@ -92,7 +94,17 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
   private Map<String, ToolRegistration> normalize(List<ToolRegistration> discovered) {
     var normalized = new LinkedHashMap<String, ToolRegistration>();
     for (var registration : discovered) {
-      var audited = registration.withInvoker(arguments -> invoke(registration, arguments));
+      var audited = registration.withInvoker(new ToolInvoker() {
+        @Override
+        public Object invoke(Map<String, Object> arguments) throws Exception {
+          return McpToolRegistry.this.invoke(registration, arguments, ToolInvocationContext.EMPTY);
+        }
+
+        @Override
+        public Object invoke(Map<String, Object> arguments, ToolInvocationContext context) throws Exception {
+          return McpToolRegistry.this.invoke(registration, arguments, context);
+        }
+      });
       var existing = normalized.putIfAbsent(audited.name(), audited);
       if (existing != null) throw new IllegalStateException("Duplicate MCP tool name: " + audited.name());
     }
@@ -109,10 +121,11 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
     }
   }
 
-  private Object invoke(ToolRegistration registration, Map<String, Object> arguments) throws Exception {
+  private Object invoke(
+      ToolRegistration registration, Map<String, Object> arguments, ToolInvocationContext context) throws Exception {
     var started = System.nanoTime();
     try {
-      var result = registration.invoker().invoke(arguments);
+      var result = registration.invoker().invoke(arguments, context);
       audit(registration, ToolAuditEvent.Operation.INVOKE, started, arguments, result, null);
       return result;
     } catch (Exception exception) {
@@ -137,13 +150,19 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
         .build();
     return McpServerFeatures.SyncToolSpecification.builder()
         .tool(tool)
-        .callHandler((exchange, request) -> call(registration, request.arguments()))
+        .callHandler((exchange, request) -> call(
+            registration, request.arguments(), exchange == null ? ToolInvocationContext.EMPTY : context(exchange.transportContext())))
         .build();
   }
 
   McpSchema.CallToolResult call(ToolRegistration registration, Map<String, Object> arguments) {
+    return call(registration, arguments, ToolInvocationContext.EMPTY);
+  }
+
+  McpSchema.CallToolResult call(
+      ToolRegistration registration, Map<String, Object> arguments, ToolInvocationContext context) {
     try {
-      var result = registration.invoker().invoke(arguments == null ? Map.of() : arguments);
+      var result = registration.invoker().invoke(arguments == null ? Map.of() : arguments, context);
       if (result instanceof McpSchema.CallToolResult callToolResult) return callToolResult;
       var text = result instanceof String value ? value : objectMapper.writeValueAsString(result);
       return McpSchema.CallToolResult.builder()
@@ -156,6 +175,14 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
           .isError(true)
           .build();
     }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static ToolInvocationContext context(io.modelcontextprotocol.common.McpTransportContext transportContext) {
+    if (transportContext == null) return ToolInvocationContext.EMPTY;
+    var value = transportContext.get(ToolInvocationContext.TRANSPORT_HEADERS_KEY);
+    if (!(value instanceof Map<?, ?> map)) return ToolInvocationContext.EMPTY;
+    return new ToolInvocationContext((Map<String, List<String>>) map);
   }
 
   private void audit(

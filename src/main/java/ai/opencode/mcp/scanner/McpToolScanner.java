@@ -35,29 +35,42 @@ public final class McpToolScanner {
 
   private final McpJsonSchemaGenerator schemaGenerator;
 
+  private final ToolEndpointBinder endpointBinder;
+
   public McpToolScanner(ConfigurableListableBeanFactory beanFactory, ObjectMapper objectMapper) {
+    this(beanFactory, objectMapper, ToolEndpointBinder.LOCAL_ONLY);
+  }
+
+  public McpToolScanner(
+      ConfigurableListableBeanFactory beanFactory, ObjectMapper objectMapper, ToolEndpointBinder endpointBinder) {
     this.beanFactory = beanFactory;
     this.objectMapper = objectMapper;
     this.schemaGenerator = new McpJsonSchemaGenerator(objectMapper);
+    this.endpointBinder = endpointBinder;
   }
 
   public List<ToolRegistration> scan() {
-    var local = Arrays.stream(beanFactory.getBeanDefinitionNames()).flatMap(this::scanBean);
+    var localMethods = Arrays.stream(beanFactory.getBeanDefinitionNames()).flatMap(this::scanBean).toList();
+    var local = endpointBinder.bind(localMethods).stream();
     var remote = beanFactory.getBeansOfType(RemoteToolClient.class, false, false).values().stream()
         .flatMap(this::scanRemote);
     return Stream.concat(local, remote).toList();
   }
 
   List<ToolRegistration> scan(Object toolProvider) {
-    return annotatedMethods(AopUtils.getTargetClass(toolProvider)).stream()
-        .map(method -> toRegistration(toolProvider, method))
-        .toList();
+    return endpointBinder.bind(scanMethods(toolProvider));
   }
 
-  private Stream<ToolRegistration> scanBean(String beanName) {
+  private Stream<ToolMethodRegistration> scanBean(String beanName) {
     var type = beanFactory.getType(beanName, false);
     if (type == null || annotatedMethods(type).isEmpty()) return Stream.empty();
-    return scan(beanFactory.getBean(beanName)).stream();
+    return scanMethods(beanFactory.getBean(beanName)).stream();
+  }
+
+  private List<ToolMethodRegistration> scanMethods(Object toolProvider) {
+    return annotatedMethods(AopUtils.getTargetClass(toolProvider)).stream()
+        .map(method -> new ToolMethodRegistration(method, toRegistration(toolProvider, method)))
+        .toList();
   }
 
   private Stream<ToolRegistration> scanRemote(RemoteToolClient client) {
