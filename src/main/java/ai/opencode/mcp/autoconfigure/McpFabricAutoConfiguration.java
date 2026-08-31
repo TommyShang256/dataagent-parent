@@ -3,7 +3,7 @@ package ai.opencode.mcp.autoconfigure;
 import ai.opencode.mcp.audit.Slf4jToolAuditLogger;
 import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
-import ai.opencode.mcp.remote.RemoteToolEndpointBinder;
+import ai.opencode.mcp.scanner.RemoteToolEndpointBinder;
 import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
 import ai.opencode.mcp.remote.ServletToolContextExtractor;
 import ai.opencode.mcp.scanner.McpToolScanner;
@@ -27,12 +27,16 @@ import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.reactive.function.client.WebClient;
 
+/** 装配 Servlet MCP Server、工具目录和远程工具调用基础设施。 */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @ConditionalOnClass({McpServer.class, ServletRegistrationBean.class})
 @ConditionalOnProperty(prefix = "opencode.mcp", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(McpFabricProperties.class)
 public class McpFabricAutoConfiguration {
+
+  /** 创建 MCP starter 自动配置。 */
+  public McpFabricAutoConfiguration() {}
 
   @Bean
   @ConditionalOnMissingBean
@@ -44,12 +48,15 @@ public class McpFabricAutoConfiguration {
   @ConditionalOnMissingBean
   HttpServletStreamableServerTransportProvider mcpTransport(
       McpJsonMapper jsonMapper, McpFabricProperties properties) {
-    var builder = HttpServletStreamableServerTransportProvider.builder()
+    HttpServletStreamableServerTransportProvider.Builder builder =
+        HttpServletStreamableServerTransportProvider.builder()
         .jsonMapper(jsonMapper)
         .mcpEndpoint(normalizeEndpoint(properties.getEndpoint()))
         .contextExtractor(new ServletToolContextExtractor())
         .maxRequestSize(Math.toIntExact(properties.getMaxRequestSize().toBytes()));
-    if (properties.getKeepAlive() != null) builder.keepAliveInterval(properties.getKeepAlive());
+    if (properties.getKeepAlive() != null) {
+      builder.keepAliveInterval(properties.getKeepAlive());
+    }
     return builder.build();
   }
 
@@ -57,8 +64,9 @@ public class McpFabricAutoConfiguration {
   @ConditionalOnMissingBean(name = "mcpServletRegistration")
   ServletRegistrationBean<HttpServletStreamableServerTransportProvider> mcpServletRegistration(
       HttpServletStreamableServerTransportProvider transport, McpFabricProperties properties) {
-    var endpoint = normalizeEndpoint(properties.getEndpoint());
-    var registration = new ServletRegistrationBean<>(transport, endpoint);
+    String endpoint = normalizeEndpoint(properties.getEndpoint());
+    ServletRegistrationBean<HttpServletStreamableServerTransportProvider> registration =
+        new ServletRegistrationBean<>(transport, endpoint);
     registration.setName("opencodeMcpServlet");
     registration.setAsyncSupported(true);
     registration.setLoadOnStartup(1);
@@ -88,7 +96,7 @@ public class McpFabricAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean
   RemoteToolWebClientProvider remoteToolWebClientProvider() {
-    var client = WebClient.builder().build();
+    WebClient client = WebClient.builder().build();
     return originKind -> client;
   }
 
@@ -119,7 +127,9 @@ public class McpFabricAutoConfiguration {
   }
 
   private static String normalizeEndpoint(String endpoint) {
-    if (endpoint == null || endpoint.isBlank()) throw new IllegalArgumentException("MCP endpoint must not be blank");
+    if (endpoint == null || endpoint.isBlank()) {
+      throw new IllegalArgumentException("MCP endpoint must not be blank");
+    }
     return endpoint.startsWith("/") ? endpoint : "/" + endpoint;
   }
 }

@@ -7,5 +7,11 @@ import org.springframework.web.reactive.function.client.WebClient;
 @FunctionalInterface
 public interface RemoteToolWebClientProvider {
 
+  /**
+   * 根据工具来源类别选择远程调用客户端。
+   *
+   * @param originKind 工具来源类别
+   * @return 用于执行远程工具请求的 WebClient
+   */
   WebClient webClient(ToolOrigin.Kind originKind);
 }

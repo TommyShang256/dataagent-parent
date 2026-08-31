@@ -194,7 +194,9 @@ class McpToolRegistryTest {
     @Override
     public void add(McpServerFeatures.SyncToolSpecification specification) {
       var name = specification.tool().name();
-      if (name.equals(reject)) throw new IllegalStateException("server rejected " + name);
+      if (name.equals(reject)) {
+        throw new IllegalStateException("server rejected " + name);
+      }
       added.add(name);
     }
 

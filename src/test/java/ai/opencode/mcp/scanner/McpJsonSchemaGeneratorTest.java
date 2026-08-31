@@ -148,7 +148,9 @@ class McpJsonSchemaGeneratorTest {
   }
 
   private static Map<String, Object> nonNull(Map<String, Object> schema) {
-    if (!schema.containsKey("anyOf")) return schema;
+    if (!schema.containsKey("anyOf")) {
+      return schema;
+    }
     return map(list(schema.get("anyOf")).get(0));
   }
 

@@ -9,6 +9,7 @@ import ai.opencode.mcp.api.ToolInvocationContext;
 import ai.opencode.mcp.api.ToolOrigin;
 import ai.opencode.mcp.autoconfigure.McpFabricProperties;
 import ai.opencode.mcp.scanner.McpToolScanner;
+import ai.opencode.mcp.scanner.RemoteToolEndpointBinder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -207,7 +208,9 @@ class RemoteToolEndpointBinderTest {
   private void assertFailure(McpFabricProperties properties, String... fragments) {
     var assertion = assertThatThrownBy(() -> scan(properties, new CaptureExchange("{}", HttpStatus.OK), new ProxyTools()))
         .isInstanceOf(IllegalStateException.class);
-    for (var fragment : fragments) assertion.hasMessageContaining(fragment);
+    for (String fragment : fragments) {
+      assertion.hasMessageContaining(fragment);
+    }
   }
 
   private List<ai.opencode.mcp.api.ToolRegistration> scan(
