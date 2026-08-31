@@ -29,10 +29,16 @@ import java.util.regex.Pattern;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestOperations;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.springframework.web.util.UriBuilder;
 
@@ -50,7 +56,8 @@ final class RemoteToolBindingFactory {
       "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE");
 
   private final ObjectMapper objectMapper;
-  private final RemoteToolWebClientProvider clients;
+  private final WebClient apiFabricClient;
+  private final CseRestTemplateProvider cseClientProvider;
   private final Duration requestTimeout;
 
   ToolRegistration bind(
@@ -75,12 +82,15 @@ final class RemoteToolBindingFactory {
         .filter(name -> !consumed.contains(name))
         .toList();
     JavaType returnType = objectMapper.constructType(toolMethod.getGenericReturnType());
+    ParameterizedTypeReference<?> cseResponseType =
+        ParameterizedTypeReference.forType(toolMethod.getGenericReturnType());
     Map<String, String> businessHeaders = Map.copyOf(endpoint.getHeaders().getBusiness());
     Set<String> normalizedBusinessHeaderNames = new HashSet<>();
     for (String name : businessHeaders.keySet()) {
       normalizedBusinessHeaderNames.add(name.toLowerCase(Locale.ROOT));
     }
     Set<String> businessHeaderNames = Set.copyOf(normalizedBusinessHeaderNames);
+    RestOperations cseClient = cseClient(type, category, reference);
     ToolInvoker invocation = new RemoteToolInvocation(
         reference,
         uriTemplate,
@@ -91,7 +101,9 @@ final class RemoteToolBindingFactory {
         businessHeaders,
         businessHeaderNames,
         bodyFields,
-        returnType);
+        returnType,
+        cseResponseType,
+        cseClient);
     return registration.withInvoker(invocation).withType(type);
   }
 
@@ -102,22 +114,24 @@ final class RemoteToolBindingFactory {
       Set<String> path,
       McpFabricProperties.Endpoint endpoint) {
     validateMap(category, reference, "Query", parameters, endpoint.getQuery());
-    validateMap(category, reference, "业务 Header", parameters, endpoint.getHeaders().getBusiness());
+    validateMap(category, reference, "Business header", parameters, endpoint.getHeaders().getBusiness());
     Set<String> querySources = new HashSet<>(endpoint.getQuery().values());
     for (String source : querySources) {
       if (path.contains(source)) {
-        throw failure(category, reference, "参数 " + source + " 同时用于 Path 和 Query");
+        throw failure(category, reference, "Parameter " + source + " cannot be used for both Path and Query");
       }
     }
     for (Map.Entry<String, String> item : endpoint.getHeaders().getBusiness().entrySet()) {
       if (RemoteRequestHeaders.isExcluded(item.getKey())) {
-        throw failure(category, reference, "业务 Header " + item.getKey() + " 是系统排除名称");
+        throw failure(category, reference, "Business header " + item.getKey() + " is a restricted system header");
       }
       if (path.contains(item.getValue())) {
-        throw failure(category, reference, "参数 " + item.getValue() + " 同时用于 Path 和业务 Header");
+        throw failure(category, reference,
+            "Parameter " + item.getValue() + " cannot be used for both Path and business header");
       }
       if (querySources.contains(item.getValue())) {
-        throw failure(category, reference, "参数 " + item.getValue() + " 同时用于 Query 和业务 Header");
+        throw failure(category, reference,
+            "Parameter " + item.getValue() + " cannot be used for both Query and business header");
       }
     }
   }
@@ -133,7 +147,7 @@ final class RemoteToolBindingFactory {
       String downstreamName = item.getKey();
       if (!StringUtils.hasText(downstreamName)
           || !downstream.add(downstreamName.toLowerCase(Locale.ROOT))) {
-        throw failure(category, reference, location + " 下游名称重复或为空: " + downstreamName);
+        throw failure(category, reference, location + " downstream name is blank or duplicated: " + downstreamName);
       }
       requireParameter(category, reference, parameters, item.getValue(), location);
     }
@@ -146,7 +160,7 @@ final class RemoteToolBindingFactory {
       String source,
       String location) {
     if (!StringUtils.hasText(source) || !parameters.contains(source)) {
-      throw failure(category, reference, location + " 引用未知工具参数: " + source);
+      throw failure(category, reference, location + " references unknown tool parameter: " + source);
     }
   }
 
@@ -156,30 +170,30 @@ final class RemoteToolBindingFactory {
       String template,
       Tool.Type type) {
     if (!StringUtils.hasText(template)) {
-      throw failure(category, reference, "URI template 不能为空");
+      throw failure(category, reference, "URI template must not be blank");
     }
     try {
       String probe = PLACEHOLDER.matcher(template).replaceAll("value");
       URI uri = URI.create(probe);
       if (!uri.isAbsolute()) {
-        throw failure(category, reference, "URI template 必须生成绝对 URI");
+        throw failure(category, reference, "URI template must produce an absolute URI");
       }
       if (type == Tool.Type.CSE
           && (!"cse".equalsIgnoreCase(uri.getScheme()) || !StringUtils.hasText(uri.getAuthority()))) {
-        throw failure(category, reference, "CSE URI 必须使用 cse://service-name/... 格式");
+        throw failure(category, reference, "CSE URI must use the cse://service-name/... format");
       }
     } catch (IllegalArgumentException exception) {
-      throw failure(category, reference, "非法 URI template: " + template);
+      throw failure(category, reference, "Invalid URI template: " + template);
     }
   }
 
   private static HttpMethod parseMethod(String category, String reference, String value) {
     if (!StringUtils.hasText(value)) {
-      throw failure(category, reference, "非法 method: " + value);
+      throw failure(category, reference, "Invalid method: " + value);
     }
     String normalized = value.toUpperCase(Locale.ROOT);
     if (!SUPPORTED_METHODS.contains(normalized)) {
-      throw failure(category, reference, "非法 method: " + value);
+      throw failure(category, reference, "Invalid method: " + value);
     }
     return HttpMethod.valueOf(normalized);
   }
@@ -193,7 +207,7 @@ final class RemoteToolBindingFactory {
       } else if (parameter.isNamePresent()) {
         result.add(parameter.getName());
       } else {
-        throw failure("工具", method.getName(), "参数名不可用: " + parameter);
+        throw failure("Tool", method.getName(), "Parameter name is unavailable: " + parameter);
       }
     }
     return result;
@@ -209,7 +223,21 @@ final class RemoteToolBindingFactory {
   }
 
   private static IllegalStateException failure(String category, String reference, String detail) {
-    return new IllegalStateException(category + " 端点 ref=" + reference + ": " + detail);
+    return new IllegalStateException(category + " endpoint ref=" + reference + ": " + detail);
+  }
+
+  private RestOperations cseClient(Tool.Type type, String category, String reference) {
+    if (type == Tool.Type.API_FABRIC) {
+      return null;
+    }
+    if (type != Tool.Type.CSE) {
+      throw failure(category, reference, "Unsupported remote tool type: " + type);
+    }
+    RestOperations client = cseClientProvider.restOperations();
+    if (client == null) {
+      throw failure(category, reference, "CSE RestTemplate provider returned null");
+    }
+    return client;
   }
 
   @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
@@ -225,6 +253,8 @@ final class RemoteToolBindingFactory {
     private final Set<String> businessHeaderNames;
     private final List<String> bodyFields;
     private final JavaType returnType;
+    private final ParameterizedTypeReference<?> cseResponseType;
+    private final RestOperations cseClient;
 
     /**
      * 在没有请求上下文时执行远程工具调用。
@@ -250,49 +280,82 @@ final class RemoteToolBindingFactory {
     public Object invoke(Map<String, Object> arguments, Map<String, List<String>> headers) throws Exception {
       Map<String, Object> safeArguments = arguments == null ? Map.of() : arguments;
       URI uri = requestUri(safeArguments);
-      WebClient.RequestBodySpec request = clients.webClient(type).method(method).uri(uri);
-      addHeaders(request, safeArguments, headers == null ? Map.of() : headers);
       ObjectNode body = body(safeArguments);
-      if (body != null) {
-        request.contentType(MediaType.APPLICATION_JSON).bodyValue(body);
-      }
+      HttpHeaders httpHeaders = requestHeaders(
+          safeArguments, headers == null ? Map.of() : headers, body != null);
       try {
-        byte[] response = request.exchangeToMono(clientResponse -> clientResponse.bodyToMono(byte[].class)
-            .defaultIfEmpty(new byte[0])
-            .flatMap(bytes -> clientResponse.statusCode().is2xxSuccessful()
-                ? reactor.core.publisher.Mono.just(bytes)
-                : reactor.core.publisher.Mono.error(new IllegalStateException(
-                    "远程工具 " + reference + " 返回 HTTP "
-                        + clientResponse.statusCode().value() + ": "
-                        + new String(bytes, StandardCharsets.UTF_8)))))
-            .block(requestTimeout);
-        return convert(response);
+        if (type == Tool.Type.API_FABRIC) {
+          return invokeApiFabric(uri, httpHeaders, body);
+        }
+        if (type == Tool.Type.CSE) {
+          return invokeCse(uri, httpHeaders, body);
+        }
+        throw new IllegalStateException("Unsupported remote tool type: " + type);
       } catch (Exception exception) {
         throw new IllegalStateException(
-            "远程工具 " + reference + " 调用失败: " + rootMessage(exception), exception);
+            "Remote tool " + reference + " invocation failed: " + rootMessage(exception), exception);
       }
     }
 
-    private void addHeaders(
-        WebClient.RequestBodySpec request,
+    private Object invokeApiFabric(URI uri, HttpHeaders httpHeaders, ObjectNode body) throws Exception {
+      WebClient.RequestBodySpec request = apiFabricClient.method(method).uri(uri);
+      request.headers(current -> current.addAll(httpHeaders));
+      if (body != null) {
+        request.bodyValue(body);
+      }
+      byte[] response = request.exchangeToMono(clientResponse -> clientResponse.bodyToMono(byte[].class)
+          .defaultIfEmpty(new byte[0])
+          .flatMap(bytes -> clientResponse.statusCode().is2xxSuccessful()
+              ? reactor.core.publisher.Mono.just(bytes)
+              : reactor.core.publisher.Mono.error(new IllegalStateException(
+                  "Remote tool " + reference + " returned HTTP "
+                      + clientResponse.statusCode().value() + ": "
+                      + new String(bytes, StandardCharsets.UTF_8)))))
+          .block(requestTimeout);
+      return convert(response);
+    }
+
+    private Object invokeCse(URI uri, HttpHeaders httpHeaders, ObjectNode body) {
+      HttpEntity<Object> requestEntity = new HttpEntity<>(body, httpHeaders);
+      try {
+        ResponseEntity<?> response = cseClient.exchange(
+            uri, method, requestEntity, cseResponseType);
+        if (!response.getStatusCode().is2xxSuccessful()) {
+          throw new IllegalStateException(
+              "Remote tool " + reference + " returned HTTP "
+                  + response.getStatusCode().value() + ": " + response.getBody());
+        }
+        return response.getBody();
+      } catch (RestClientResponseException exception) {
+        throw new IllegalStateException(
+            "Remote tool " + reference + " returned HTTP " + exception.getStatusCode().value()
+                + ": " + exception.getResponseBodyAsString(), exception);
+      }
+    }
+
+    private HttpHeaders requestHeaders(
         Map<String, Object> arguments,
-        Map<String, List<String>> requestHeaders) {
-      request.headers(headers -> {
-        requestHeaders.forEach((name, values) -> {
-          if (RemoteRequestHeaders.isExcluded(name)
-              || businessHeaderNames.contains(name.toLowerCase(Locale.ROOT))) {
-            return;
-          }
-          values.forEach(value -> {
-            RemoteRequestHeaders.validateValue(name, value);
-            headers.add(name, value);
-          });
-        });
-        businessHeaders.forEach((name, source) -> values(arguments.get(source)).forEach(value -> {
+        Map<String, List<String>> inboundHeaders,
+        boolean hasBody) {
+      HttpHeaders result = new HttpHeaders();
+      inboundHeaders.forEach((name, values) -> {
+        if (RemoteRequestHeaders.isExcluded(name)
+            || businessHeaderNames.contains(name.toLowerCase(Locale.ROOT))) {
+          return;
+        }
+        values.forEach(value -> {
           RemoteRequestHeaders.validateValue(name, value);
-          headers.add(name, value);
-        }));
+          result.add(name, value);
+        });
       });
+      businessHeaders.forEach((name, source) -> values(arguments.get(source)).forEach(value -> {
+        RemoteRequestHeaders.validateValue(name, value);
+        result.add(name, value);
+      }));
+      if (hasBody) {
+        result.setContentType(MediaType.APPLICATION_JSON);
+      }
+      return result;
     }
 
     private URI requestUri(Map<String, Object> arguments) {
@@ -305,7 +368,7 @@ final class RemoteToolBindingFactory {
       for (String name : path) {
         if (!arguments.containsKey(name) || arguments.get(name) == null) {
           throw new IllegalArgumentException(
-              "远程工具 " + reference + " 缺少 Path 参数: " + name);
+              "Remote tool " + reference + " is missing Path parameter: " + name);
         }
         variables.put(name, scalar(arguments.get(name)));
       }

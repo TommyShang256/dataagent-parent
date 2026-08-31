@@ -27,11 +27,19 @@ starter SHALL 接受一个 API Fabric 基础 URL，并为每个引用接受 HTTP
 - **THEN** 下游请求使用 `POST`，并使用基础 URL 与展开后的 path template 组合得到的 URI
 
 ### Requirement: CSE 端点保留完整 CSE URI
-starter SHALL 为每个 CSE 引用接受 HTTP method 和完整的 `cse://service-name/...` URI template，并将展开后的 URI 传给下游客户端，不得改写其 scheme、service name 或 path。
+starter SHALL 为每个 CSE 引用接受 HTTP method 和完整的 `cse://service-name/...` URI template，并将展开后的 URI 传给应用提供的 Spring `RestOperations`，不得使用 WebClient 或改写其 scheme、service name、path。
 
 #### Scenario: CSE URI 保持不变
 - **WHEN** 匹配的 CSE 引用展开为 `cse://inventory-service/items/SKU-1`
 - **THEN** 下游客户端收到完整 URI，且 `cse` scheme 保持不变
+
+#### Scenario: 应用提供 CSE RestTemplate
+- **WHEN** 应用配置了 CSE 端点引用并提供 `CseRestTemplateProvider`
+- **THEN** starter 使用 provider 返回的 `RestOperations` 执行 CSE 请求
+
+#### Scenario: CSE RestTemplate 尚未实现
+- **WHEN** 应用配置了 CSE 端点引用但没有替换 starter 的占位 provider
+- **THEN** 应用在发布工具目录之前启动失败，诊断信息明确要求提供 CSE RestTemplate 实现
 
 ### Requirement: 远程端点类别通过统一接口独立替换
 starter SHALL 通过公共远程端点处理接口接入不同端点类别，并分别提供 API Fabric 和 CSE 默认实现。应用替换其中一个类别的实现时，MUST NOT 禁用或替换另一个类别的默认实现；scanner 必须汇总全部实现并统一完成工具绑定与跨实现引用校验。
@@ -157,3 +165,10 @@ starter SHALL 在向 MCP Server 发布任何远程绑定工具之前，验证全
 #### Scenario: API Fabric 模板不是绝对路径
 - **WHEN** API Fabric `path-template` 未以单个 `/` 开头，或被配置为绝对 URI、scheme-relative URI
 - **THEN** 应用在发布工具目录之前启动失败，诊断信息明确指出对应引用和非法 `path-template`
+
+### Requirement: 生产运行时字符串统一使用英文
+starter SHALL 对工具审计、注册回滚、审计记录失败、启动校验和远程调用失败等生产运行时字符串使用英文，不得在日志模板、异常消息或断言消息的字符串字面量中写入中文。工具参数、结果和外部异常等动态业务值必须保持原值，不属于语言转换范围。
+
+#### Scenario: 输出工具运行日志
+- **WHEN** starter 记录工具审计事件，或框架记录启动校验、注册回滚、审计失败及远程调用异常
+- **THEN** starter 自身提供的固定文本、字段名和异常消息只使用英文，不包含中文字符

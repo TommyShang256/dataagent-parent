@@ -6,7 +6,7 @@ import java.lang.reflect.Method;
 import java.util.Set;
 
 /**
- * 定义将一种远程端点配置绑定为注解工具调用计划的公共扩展契约。
+ * 远程工具调用绑定器
  *
  * @author beining.shang
  * @since 2026-08-31

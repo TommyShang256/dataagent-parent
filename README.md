@@ -100,20 +100,23 @@ API Fabric 将公共 `base-url` 与 `path-template` 组合。CSE 的完整 `cse:
 业务 Header 属于工具 arguments，默认审计实现会记录其值。敏感业务 Header 应由应用提供的 `ToolAuditLogger`
 执行脱敏和保留策略；普通透传 Header 的值不会进入审计事件。
 
-## 自定义 CSE WebClient
+## 提供 CSE RestTemplate
 
-默认 HTTP connector 通常不识别 `cse` scheme。CSE 部署必须替换公开扩展点 `RemoteToolWebClientProvider`，
-返回安装了对应 `ClientHttpConnector`、filter、认证或观测能力的 `WebClient`：
+starter 不内置公司环境相关的 CSE 实现。启用 CSE ref 时，应用必须通过公开扩展点
+`CseRestTemplateProvider` 返回能够处理 `cse://` URI 的 `RestOperations`：
 
 ```java
 @Bean
-RemoteToolWebClientProvider remoteClients(WebClient cseClient, WebClient fabricClient) {
-  return type -> type == Tool.Type.CSE ? cseClient : fabricClient;
+CseRestTemplateProvider cseRestTemplateProvider(RestTemplate companyCseRestTemplate) {
+  return () -> companyCseRestTemplate;
 }
 ```
 
-调用沿用同步 MCP Server 模式，并以 `opencode.mcp.request-timeout` 作为阻塞等待上限。非 2xx 状态、connector
-失败、超时、URI 构建和返回值转换失败都会成为 `isError=true` 的 MCP 工具结果，应用和固定目录保持可用。
+共享绑定器按最终 `Tool.Type` 选择执行通道：`API_FABRIC` 使用独立 WebClient，
+`CSE` 构造 `HttpEntity<Object>` 并调用
+`RestOperations.exchange(url, method, requestEntity, responseType)`。如果配置了 CSE ref 但未提供有效
+provider，应用会在发布工具目录前失败。API Fabric 使用 `opencode.mcp.request-timeout`；CSE 的超时由
+应用提供的 `RestOperations` 配置。两类通道的状态、连接和转换失败都会成为 `isError=true` 的 MCP 工具结果。
 
 ## 替换远程端点处理器
 

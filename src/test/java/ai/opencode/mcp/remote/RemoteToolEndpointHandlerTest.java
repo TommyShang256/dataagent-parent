@@ -5,11 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.annotation.ToolParam;
+import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.autoconfigure.McpFabricProperties;
 import ai.opencode.mcp.scanner.McpToolScanner;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -18,9 +21,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
 import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.client.ClientRequest;
@@ -28,6 +34,8 @@ import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeFunction;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Mono;
 
 /**
@@ -76,15 +84,45 @@ class RemoteToolEndpointHandlerTest {
 
   @Test
   void preservesCseSchemeAndConvertsGenericResponseWithoutExecutingProxyBody() throws Exception {
-    var capture = new CaptureExchange("[\"reserved\",\"SKU-1\"]", HttpStatus.OK);
-    var tool = scan(validProperties(), capture, new ProxyTools()).stream()
+    CaptureExchange fabric = new CaptureExchange("{}", HttpStatus.OK);
+    CaptureRestOperations capture =
+        new CaptureRestOperations("[\"reserved\",\"SKU-1\"]", HttpStatus.OK);
+    ToolRegistration tool = scan(validProperties(), fabric, () -> capture, new ProxyTools()).stream()
         .filter(item -> item.name().equals("reserve_inventory")).findFirst().orElseThrow();
 
     assertThat(tool.type()).isEqualTo(Tool.Type.CSE);
     assertThat(tool.invoker().invoke(Map.of("warehouseId", "W 1", "sku", "SKU-1")))
         .isEqualTo(List.of("reserved", "SKU-1"));
+    assertThat(capture.method).isEqualTo(HttpMethod.POST);
     assertThat(capture.uri.toString()).isEqualTo("cse://inventory-service/warehouses/W%201/reservations");
-    assertThat(mapper.readTree(capture.body)).isEqualTo(mapper.readTree("{\"sku\":\"SKU-1\"}"));
+    assertThat(capture.headers.getContentType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+    JsonNode capturedBody = mapper.valueToTree(capture.body);
+    assertThat(capturedBody).isEqualTo(mapper.readTree("{\"sku\":\"SKU-1\"}"));
+  }
+
+  @Test
+  void failsBeforePublishingCseToolWhenRestTemplateIsNotConfigured() {
+    CseRestTemplateProvider missing = () -> {
+      throw new IllegalStateException(
+          "CSE RestTemplate is not configured; provide a CseRestTemplateProvider bean");
+    };
+    assertThatThrownBy(() -> scan(
+        validProperties(), new CaptureExchange("{}", HttpStatus.OK), missing, new ProxyTools()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("CSE RestTemplate", "CseRestTemplateProvider");
+  }
+
+  @Test
+  void mapsCseStatusAndResponseBodyToToolError() {
+    CaptureRestOperations capture =
+        new CaptureRestOperations("inventory unavailable", HttpStatus.SERVICE_UNAVAILABLE);
+    ToolRegistration tool = tool(scan(
+        validProperties(), new CaptureExchange("{}", HttpStatus.OK), () -> capture, new ProxyTools()),
+        "reserve_inventory");
+
+    assertThatThrownBy(() -> tool.invoker().invoke(Map.of("warehouseId", "W", "sku", "SKU-1")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("reserve_inventory", "503", "inventory unavailable");
   }
 
   @Test
@@ -108,14 +146,14 @@ class RemoteToolEndpointHandlerTest {
     cse.setMethod("POST");
     cse.setUriTemplate("cse://service/items/{tenantId}");
     duplicate.getCse().getEndpoints().put("create_order", cse);
-    assertFailure(duplicate, "端点", "create_order", "API Fabric", "CSE");
+    assertFailure(duplicate, "endpoint", "create_order", "API Fabric", "CSE");
 
     var unknown = validProperties();
     var endpoint = new McpFabricProperties.ApiFabricEndpoint();
     endpoint.setMethod("GET");
     endpoint.setPathTemplate("/unknown");
     unknown.getApiFabric().getEndpoints().put("unknown_ref", endpoint);
-    assertFailure(unknown, "API Fabric", "unknown_ref", "没有对应");
+    assertFailure(unknown, "API Fabric", "unknown_ref", "no matching");
 
     var missing = validProperties();
     missing.getApiFabric().getEndpoints().get("create_order").setPathTemplate("/orders/{missing}");
@@ -131,17 +169,17 @@ class RemoteToolEndpointHandlerTest {
 
     var duplicateDownstream = validProperties();
     duplicateDownstream.getApiFabric().getEndpoints().get("create_order").getQuery().put("TAG", "customerId");
-    assertFailure(duplicateDownstream, "API Fabric", "create_order", "Query", "重复");
+    assertFailure(duplicateDownstream, "API Fabric", "create_order", "Query", "duplicated");
 
     var queryHeaderConflict = validProperties();
     queryHeaderConflict.getApiFabric().getEndpoints().get("create_order").getHeaders().getBusiness()
         .put("X-Tag-Mode", "tags");
-    assertFailure(queryHeaderConflict, "API Fabric", "create_order", "tags", "Query", "业务 Header");
+    assertFailure(queryHeaderConflict, "API Fabric", "create_order", "tags", "Query", "business header");
 
     var restricted = validProperties();
     restricted.getApiFabric().getEndpoints().get("create_order").getHeaders().getBusiness()
         .put("Content-Length", "bizMode");
-    assertFailure(restricted, "API Fabric", "create_order", "Content-Length", "系统排除");
+    assertFailure(restricted, "API Fabric", "create_order", "Content-Length", "restricted system header");
 
     var invalidMethod = validProperties();
     invalidMethod.getApiFabric().getEndpoints().get("create_order").setMethod("FETCH");
@@ -150,17 +188,17 @@ class RemoteToolEndpointHandlerTest {
     McpFabricProperties absolutePath = validProperties();
     absolutePath.getApiFabric().getEndpoints().get("create_order")
         .setPathTemplate("https://other.example/orders");
-    assertFailure(absolutePath, "API Fabric", "create_order", "path-template", "单个 /");
+    assertFailure(absolutePath, "API Fabric", "create_order", "path-template", "exactly one /");
 
     McpFabricProperties relativePath = validProperties();
     relativePath.getApiFabric().getEndpoints().get("create_order")
         .setPathTemplate("orders/{tenantId}");
-    assertFailure(relativePath, "API Fabric", "create_order", "path-template", "单个 /");
+    assertFailure(relativePath, "API Fabric", "create_order", "path-template", "exactly one /");
 
     McpFabricProperties schemeRelativePath = validProperties();
     schemeRelativePath.getApiFabric().getEndpoints().get("create_order")
         .setPathTemplate("//other.example/orders/{tenantId}");
-    assertFailure(schemeRelativePath, "API Fabric", "create_order", "path-template", "单个 /");
+    assertFailure(schemeRelativePath, "API Fabric", "create_order", "path-template", "exactly one /");
   }
 
   @Test
@@ -235,22 +273,32 @@ class RemoteToolEndpointHandlerTest {
     }
   }
 
-  private List<ai.opencode.mcp.api.ToolRegistration> scan(
+  private List<ToolRegistration> scan(
       McpFabricProperties properties, ExchangeFunction capture, Object bean) {
+    return scan(
+        properties,
+        capture,
+        () -> new CaptureRestOperations("[]", HttpStatus.OK),
+        bean);
+  }
+
+  private List<ToolRegistration> scan(
+      McpFabricProperties properties,
+      ExchangeFunction capture,
+      CseRestTemplateProvider cseClientProvider,
+      Object bean) {
     var factory = new DefaultListableBeanFactory();
     var definition = new RootBeanDefinition(bean.getClass());
     definition.setInstanceSupplier(() -> bean);
     factory.registerBeanDefinition("tools", definition);
-    RemoteToolWebClientProvider provider =
-        origin -> WebClient.builder().exchangeFunction(capture).build();
+    WebClient apiFabricClient = WebClient.builder().exchangeFunction(capture).build();
     List<RemoteToolEndpointHandler> handlers = List.of(
-        new ApiFabricToolEndpointHandler(properties, mapper, provider),
-        new CseToolEndpointHandler(properties, mapper, provider));
+        new ApiFabricToolEndpointHandler(properties, mapper, apiFabricClient, cseClientProvider),
+        new CseToolEndpointHandler(properties, mapper, apiFabricClient, cseClientProvider));
     return new McpToolScanner(factory, mapper, handlers).scan();
   }
 
-  private static ai.opencode.mcp.api.ToolRegistration tool(
-      List<ai.opencode.mcp.api.ToolRegistration> tools, String name) {
+  private static ToolRegistration tool(List<ToolRegistration> tools, String name) {
     return tools.stream().filter(tool -> tool.name().equals(name)).findFirst().orElseThrow();
   }
 
@@ -350,6 +398,57 @@ class RemoteToolEndpointHandlerTest {
       };
       return request.body().insert(mock, context).thenReturn(
           ClientResponse.create(status).header("Content-Type", "application/json").body(responseBody).build());
+    }
+  }
+
+  final class CaptureRestOperations extends RestTemplate {
+
+    private final String responseBody;
+    private final HttpStatus status;
+    private HttpMethod method;
+    private URI uri;
+    private HttpHeaders headers;
+    private Object body;
+
+    CaptureRestOperations(String responseBody, HttpStatus status) {
+      this.responseBody = responseBody;
+      this.status = status;
+    }
+
+    /**
+     * 捕获 CSE RestTemplate 请求并按声明泛型构造测试响应。
+     *
+     * @param url 展开后的 CSE URI
+     * @param method HTTP 方法
+     * @param requestEntity 请求实体
+     * @param responseType 响应泛型
+     * @param <T> 响应类型
+     * @return 捕获请求后构造的响应
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T> ResponseEntity<T> exchange(
+        URI url,
+        HttpMethod method,
+        HttpEntity<?> requestEntity,
+        ParameterizedTypeReference<T> responseType) {
+      this.uri = url;
+      this.method = method;
+      this.headers = new HttpHeaders();
+      this.headers.putAll(requestEntity.getHeaders());
+      this.body = requestEntity.getBody();
+      if (!status.is2xxSuccessful()) {
+        throw HttpServerErrorException.create(
+            status, status.getReasonPhrase(), HttpHeaders.EMPTY,
+            responseBody.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);
+      }
+      try {
+        T result = (T) mapper.readValue(
+            responseBody, mapper.constructType(responseType.getType()));
+        return ResponseEntity.status(status).body(result);
+      } catch (Exception exception) {
+        throw new IllegalStateException(exception);
+      }
     }
   }
 }

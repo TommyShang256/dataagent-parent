@@ -5,8 +5,8 @@ import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
 import ai.opencode.mcp.remote.ApiFabricToolEndpointHandler;
 import ai.opencode.mcp.remote.CseToolEndpointHandler;
+import ai.opencode.mcp.remote.CseRestTemplateProvider;
 import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
-import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
 import ai.opencode.mcp.remote.RemoteRequestHeaders;
 import ai.opencode.mcp.scanner.McpToolScanner;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +19,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -99,24 +100,40 @@ public class McpFabricAutoConfiguration {
   }
 
   @Bean
+  @ConditionalOnMissingBean(name = "apiFabricWebClient")
+  WebClient apiFabricWebClient() {
+    return WebClient.builder().build();
+  }
+
+  @Bean
   @ConditionalOnMissingBean
-  RemoteToolWebClientProvider remoteToolWebClientProvider() {
-    WebClient client = WebClient.builder().build();
-    return type -> client;
+  CseRestTemplateProvider cseRestTemplateProvider() {
+    return () -> {
+      throw new IllegalStateException(
+          "CSE RestTemplate is not configured; provide a CseRestTemplateProvider bean");
+    };
   }
 
   @Bean
   @ConditionalOnMissingBean(name = ApiFabricToolEndpointHandler.BEAN_NAME)
   ApiFabricToolEndpointHandler apiFabricToolEndpointHandler(
-      McpFabricProperties properties, ObjectMapper objectMapper, RemoteToolWebClientProvider provider) {
-    return new ApiFabricToolEndpointHandler(properties, objectMapper, provider);
+      McpFabricProperties properties,
+      ObjectMapper objectMapper,
+      @Qualifier("apiFabricWebClient") WebClient apiFabricClient,
+      CseRestTemplateProvider cseClientProvider) {
+    return new ApiFabricToolEndpointHandler(
+        properties, objectMapper, apiFabricClient, cseClientProvider);
   }
 
   @Bean
   @ConditionalOnMissingBean(name = CseToolEndpointHandler.BEAN_NAME)
   CseToolEndpointHandler cseToolEndpointHandler(
-      McpFabricProperties properties, ObjectMapper objectMapper, RemoteToolWebClientProvider provider) {
-    return new CseToolEndpointHandler(properties, objectMapper, provider);
+      McpFabricProperties properties,
+      ObjectMapper objectMapper,
+      @Qualifier("apiFabricWebClient") WebClient apiFabricClient,
+      CseRestTemplateProvider cseClientProvider) {
+    return new CseToolEndpointHandler(
+        properties, objectMapper, apiFabricClient, cseClientProvider);
   }
 
   @Bean

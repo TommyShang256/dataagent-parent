@@ -12,8 +12,8 @@ import ai.opencode.mcp.audit.ToolAuditLogger;
 import ai.opencode.mcp.registry.McpToolRegistry;
 import ai.opencode.mcp.remote.ApiFabricToolEndpointHandler;
 import ai.opencode.mcp.remote.CseToolEndpointHandler;
+import ai.opencode.mcp.remote.CseRestTemplateProvider;
 import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
-import ai.opencode.mcp.remote.RemoteToolWebClientProvider;
 import ai.opencode.mcp.scanner.McpToolScanner;
 import io.modelcontextprotocol.server.McpSyncServer;
 
@@ -30,6 +30,7 @@ import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestTemplate;
 
 /**
  * 验证 MCP 自动配置、条件装配和远程端点处理器替换行为。
@@ -133,7 +134,8 @@ class McpFabricAutoConfigurationTest {
       assertThat(context).doesNotHaveBean(McpToolScanner.class);
       assertThat(context).doesNotHaveBean(McpToolRegistry.class);
       assertThat(context).doesNotHaveBean(RemoteToolEndpointHandler.class);
-      assertThat(context).doesNotHaveBean(RemoteToolWebClientProvider.class);
+      assertThat(context).doesNotHaveBean(CseRestTemplateProvider.class);
+      assertThat(context).doesNotHaveBean(WebClient.class);
     });
   }
 
@@ -146,12 +148,19 @@ class McpFabricAutoConfigurationTest {
   }
 
   @Test
-  void applicationCanReplaceRemoteWebClientProvider() {
-    var custom = (RemoteToolWebClientProvider) origin -> WebClient.builder().build();
-    baseRunner.withBean(RemoteToolWebClientProvider.class, () -> custom).run(context -> {
-      assertThat(context).hasSingleBean(RemoteToolWebClientProvider.class);
-      assertThat(context.getBean(RemoteToolWebClientProvider.class)).isSameAs(custom);
+  void applicationCanReplaceCseRestTemplateProvider() {
+    CseRestTemplateProvider custom = RestTemplate::new;
+    baseRunner.withBean(CseRestTemplateProvider.class, () -> custom).run(context -> {
+      assertThat(context).hasSingleBean(CseRestTemplateProvider.class);
+      assertThat(context.getBean(CseRestTemplateProvider.class)).isSameAs(custom);
     });
+  }
+
+  @Test
+  void applicationCanReplaceApiFabricWebClient() {
+    WebClient custom = WebClient.builder().build();
+    baseRunner.withBean("apiFabricWebClient", WebClient.class, () -> custom).run(context ->
+        assertThat(context.getBean("apiFabricWebClient")).isSameAs(custom));
   }
 
   @Test

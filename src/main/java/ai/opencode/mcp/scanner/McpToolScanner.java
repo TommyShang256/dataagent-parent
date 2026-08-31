@@ -106,24 +106,25 @@ public final class McpToolScanner {
     Map<String, RemoteToolEndpointHandler> result = new LinkedHashMap<>();
     for (RemoteToolEndpointHandler handler : endpointHandlers) {
       if (handler == null) {
-        throw new IllegalStateException("远程端点处理器不能为空");
+        throw new IllegalStateException("Remote endpoint handler must not be null");
       }
       String endpointType = handler.endpointType();
       if (!StringUtils.hasText(endpointType)) {
-        throw new IllegalStateException("远程端点处理器类型名称不能为空: " + handler.getClass().getName());
+        throw new IllegalStateException("Remote endpoint handler type must not be blank: "
+            + handler.getClass().getName());
       }
       Set<String> references = handler.references();
       if (references == null) {
-        throw new IllegalStateException(endpointType + " 端点处理器返回了 null 引用集合");
+        throw new IllegalStateException(endpointType + " endpoint handler returned a null reference set");
       }
       for (String reference : references) {
         if (!StringUtils.hasText(reference)) {
-          throw new IllegalStateException(endpointType + " 端点 ref 不能为空");
+          throw new IllegalStateException(endpointType + " endpoint ref must not be blank");
         }
         RemoteToolEndpointHandler previous = result.putIfAbsent(reference, handler);
         if (previous != null) {
-          throw new IllegalStateException("远程端点 ref=" + reference + " 同时由 "
-              + previous.endpointType() + " 和 " + endpointType + " 处理");
+          throw new IllegalStateException("Remote endpoint ref=" + reference + " is handled by both "
+              + previous.endpointType() + " and " + endpointType);
         }
       }
     }
@@ -140,7 +141,7 @@ public final class McpToolScanner {
     handlers.forEach((reference, handler) -> {
       if (!toolNames.contains(reference)) {
         throw new IllegalStateException(
-            handler.endpointType() + " 端点 ref=" + reference + ": 没有对应注解工具");
+            handler.endpointType() + " endpoint ref=" + reference + ": no matching annotated tool");
       }
     });
   }

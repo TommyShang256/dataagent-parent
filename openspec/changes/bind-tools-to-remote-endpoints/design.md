@@ -113,7 +113,7 @@ Servlet transport 安装 `McpTransportContextExtractor<HttpServletRequest>`。�
 
 `ToolOrigin` 同时保存类别与 `sourceId`，但远程 `sourceId` 与 `@Tool.name`/端点 ref 重复，本地类名也只用于日志，不参与路由或调用。删除该包装类型，在 `Tool` 注解类型中声明嵌套枚举 `Type`，并由 `ToolRegistration` 保存扫描和端点绑定后解析出的最终类型。
 
-`Tool.Type` 包含 `LOCAL`、`API_FABRIC`、`CSE` 和 `CUSTOM`。前三项对应 starter 内置路径；`CUSTOM` 仅供公共 `RemoteToolEndpointHandler` 扩展实现标识自定义远程类别。类型不作为 `@Tool` 的可配置注解属性，避免注解值与端点配置发生冲突。审计事件只记录最终类型，不再记录重复的来源标识；WebClient provider 直接按最终类型选择客户端。
+`Tool.Type` 包含 `LOCAL`、`API_FABRIC`、`CSE` 和 `CUSTOM`。前三项对应 starter 内置路径；`CUSTOM` 仅供公共 `RemoteToolEndpointHandler` 扩展实现标识自定义远程类别。类型不作为 `@Tool` 的可配置注解属性，避免注解值与端点配置发生冲突。审计事件只记录最终类型，不再记录重复的来源标识；共享绑定器按最终类型选择 WebClient 或 RestOperations 执行通道。
 
 备选方案：在 `@Tool` 上公开 `type` 属性。不采用，因为同一个注解工具是否远程及远程类别由配置绑定结果决定，手工属性会形成第二个不一致的事实来源。
 
@@ -127,15 +127,29 @@ SDK `ToolAnnotations`。该 record 没有校验、计算或独立扩展策略，
 不在 `ToolRegistration` 中保存 `Tool` 注解实例。注解是扫描输入，且空工具名仍需结合 Java 方法名解析；运行期
 注册模型只保存解析后的稳定值。远程端点绑定只替换 invoker 和最终类型，复制注册信息时完整保留四个行为属性。
 
-### 6. API Fabric 和 CSE 共用一条 WebClient 请求管线
+### 6. API Fabric 和 CSE 共享绑定规则但使用独立客户端
 
-增加 Spring WebFlux 客户端库，但不改变 Servlet Server 技术栈。统一的请求构建器应用参数映射，并通过 `WebClient` 发起同步调用，因为当前 MCP Server 是同步模式。
+增加 Spring WebFlux 客户端库但不改变 Servlet Server 技术栈，仅由 API Fabric 使用 WebClient。统一绑定工厂继续
+负责编译 URI、Query、Header、Body 和返回类型计划，执行阶段显式按最终 `Tool.Type` 选择客户端：
+`API_FABRIC` 进入 WebClient 分支，`CSE` 进入 RestOperations 分支。
 
-API Fabric URI 先组合已校验的基础 URL 与 path template，再展开 path 参数。CSE 从完整 URI template 开始，并将最终的 `cse://` URI 原样交给 WebClient。starter 暴露可替换的远程 WebClient provider，使 CSE 部署能够提供理解自定义 scheme 的 `ClientHttpConnector`；starter 不模拟服务发现，也不改写地址。
+API Fabric URI 先组合已校验的基础 URL 与 path template，再展开 path 参数，并由独立 WebClient 执行。CSE 从完整
+URI template 开始，将最终 `cse://` URI、method、`HttpEntity` 和泛型返回类型交给 Spring `RestOperations`。
+CSE 不再经过 WebClient。
 
-成功响应使用已配置的 `ObjectMapper`，按照方法解析后的泛型返回类型读取并转换 JSON。String 和 void-like 返回值单独处理。`WebClient` 状态异常、connector 错误、超时、URI 错误和转换错误通过现有 MCP error adapter 返回，同时保留原始调用审计失败信息。
+新增公共 `CseRestTemplateProvider`，应用通过它返回公司环境增强后的 `RestOperations`。starter 不依赖 Apache
+ServiceComb，也不猜测公司内部服务发现、Header 或超时实现；默认 provider 是明确的占位实现，只要存在 CSE ref，
+handler 在绑定期取 client 时立即失败，避免发布一个必然运行期失败的工具。应用未配置 CSE ref 时占位 provider
+不影响本地工具和 API Fabric。
 
-备选方案：使用面向 Servlet 的 REST client。不采用，因为 API Fabric 与 CSE 已明确要求使用 WebClient，且 CSE 需要可替换的 connector 边界。
+API Fabric 成功响应继续使用已配置的 `ObjectMapper` 按泛型返回类型转换。CSE 使用
+`ParameterizedTypeReference.forType` 将注解方法的完整返回类型交给 `RestOperations`。两类客户端的状态异常、
+连接错误和转换错误都通过现有 MCP error adapter 返回；API Fabric 使用 starter 请求超时，CSE 超时由应用提供的
+RestOperations 实现负责。
+
+备选方案：直接依赖 Apache ServiceComb `RestTemplateBuilder`。不采用，因为公司内部 CSE 实现与外部版本不同，
+starter 只应定义 Spring RestTemplate 扩展边界。备选方案：为 CSE 保留 WebClient provider。不采用，因为已明确
+CSE 不使用 WebClient。
 
 ### 6.1 端点类别使用公共 SPI 并可独立替换
 
@@ -167,11 +181,13 @@ plan 和 executor 类型。绑定期预计算不区分大小写的业务 Header 
 
 API Fabric handler 在组合 `base-url` 前验证 `path-template` 必须以单个 `/` 开头，拒绝绝对 URI、
 scheme-relative URI 和缺少根斜杠的模板。API Fabric 与 CSE 两个 handler 仍作为独立默认类存在；
-`RemoteToolEndpointHandler` 负责替换配置解释和绑定策略，`RemoteToolWebClientProvider` 负责替换 connector、认证和
-客户端行为，二者不合并。
+`RemoteToolEndpointHandler` 负责替换配置解释和绑定策略；API Fabric WebClient 与
+`CseRestTemplateProvider` 与独立 API Fabric WebClient 分别提供两类客户端，不再保留按
+`Tool.Type` 返回 WebClient 的公共 provider；`Tool.Type` 改由共享绑定器用于选择
+WebClient 或 RestOperations 执行分支。
 
-备选方案：合并 API Fabric/CSE handler。不采用，因为会恢复类型分支并破坏独立替换边界。备选方案：删除
-WebClient provider、要求自定义 handler 重写整个请求管线。不采用，因为消费端确实需要只替换 CSE connector。
+备选方案：合并 API Fabric/CSE handler。不采用，因为会恢复类型分支并破坏独立替换边界。备选方案：要求自定义
+CSE handler 重写整个请求管线。不采用，因为应用只需要补充公司内部 RestTemplate 实现。
 备选方案：把共享绑定组件拆成多个顶层类型。不采用，因为验证、参数划分和执行共同构成一次配置到 invoker 的编译。
 
 ### 7. Server 注册前完成全部校验
@@ -182,13 +198,22 @@ registry 添加任何 SDK tool specification 之前，先编译端点目录和�
 
 ### 8. 消费端测试验证外部请求行为
 
-同级 `dataagent-mcp-test` 应用声明注解代理工具，其方法体在被执行时主动失败，并配置具有代表性的 API Fabric 和 CSE 引用。测试专用 WebClient exchange function 捕获下游请求并返回确定的 JSON。断言覆盖 method、URI、path 编码、重复 query 值、业务 Header、默认透传 Header、系统排除 Header、展开 Body、声明返回类型转换、本地 fallback 以及下游失败。
+同级 `dataagent-mcp-test` 应用声明注解代理工具，其方法体在被执行时主动失败，并配置具有代表性的 API Fabric 和 CSE 引用。测试分别捕获 WebClient 和 RestOperations 请求并返回确定的 JSON。断言覆盖 method、URI、path 编码、重复 query 值、业务 Header、默认透传 Header、系统排除 Header、展开 Body、声明返回类型转换、本地 fallback 以及下游失败。
 
 starter 级测试覆盖配置绑定、校验诊断、context 提取、审计隔离、Header 请求隔离，以及 `cse` URI 原样到达 provider。
 
+### 9. 生产运行时字符串统一使用英文
+
+starter 自身定义的 SLF4J 日志模板、字段名、异常消息和断言消息统一使用英文。异常可能被 Spring 或其他框架自动
+记录，因此只检查显式 `log.*` 调用不足以保证最终日志没有中文。测试扫描 starter 及消费端生产 Java 源码的全部
+字符串字面量，拒绝其中包含中文字符，防止中文固定文本通过任何运行时路径进入日志。
+
+工具名称、调用参数、调用结果和下游异常属于外部动态值，必须保持原始业务含义，不做翻译、替换或丢弃。该约束
+不改变中文 JavaDoc、注释、README 和 OpenSpec；源码扫描只解析字符串字面量，不把注释误判为运行时内容。
+
 ## Risks / Trade-offs
 
-- [默认 WebClient connector 通常拒绝 `cse` URI] → 保持 URI 不变，并要求 CSE 部署提供可替换的 provider/connector；使用请求捕获客户端验证该边界。
+- [starter 无法猜测公司内部 CSE RestTemplate 实现] → 只提供 `CseRestTemplateProvider` 边界，配置 CSE ref 但未提供实现时在发布目录前失败。
 - [公共 handler 允许应用增加端点类别，可能产生跨实现 ref 冲突] → 由 scanner 在目录发布前集中检查，禁止按 Bean 顺序静默覆盖。
 - [context-aware 调用重载可能被包装器意外绕过] → 为 registry 审计包装和实际 MCP call handler 中的远程调用增加契约测试。
 - [业务 Header 参数可能包含敏感值，当前审计会记录 arguments] → 保留现有已记录的审计契约，明确排除透传值，并建议应用对敏感业务参数进行审计脱敏。
@@ -201,7 +226,7 @@ starter 级测试覆盖配置绑定、校验诊断、context 提取、审计隔�
 
 1. 增加 WebClient 支持、端点属性、配置元数据、请求 context 和绑定组件；未配置端点时，现有应用继续使用本地注解工具。
 2. 使用现有注解工具名称作为 key，增加 API Fabric 或 CSE 端点配置；应用下次重启后，匹配的注解工具成为远程代理。
-3. 启用 `cse` 引用之前，提供运行环境对应的 WebClient connector/provider。
+3. 启用 `cse` 引用之前，通过 `CseRestTemplateProvider` 提供运行环境对应的 `RestOperations`。
 4. 验证消费端模块，并确保部署后的每次 MCP 工具调用都携带所需请求 Header。
 5. 回滚时删除端点配置；重启后，相同注解方法恢复本地调用。
 

@@ -6,7 +6,7 @@
 
 - 使用 `@Tool.name` 作为端点引用，在启动时将注解工具与一个 API Fabric 或 CSE 端点匹配。
 - 增加 API Fabric 配置：所有接口共享一个 `base-url`，每个引用分别配置 HTTP method 和 `path-template`。
-- 增加 CSE 配置：每个引用分别配置完整的 `cse://service-name/...` URI 模板和 HTTP method；交给 `WebClient` 时保持 URI 不变。
+- 增加 CSE 配置：每个引用分别配置完整的 `cse://service-name/...` URI 模板和 HTTP method；交给应用提供的 `RestOperations` 时保持 URI 不变。
 - 将远程端点类别抽象为统一的公共处理接口，并分别提供可独立替换的 API Fabric 与 CSE 默认实现；scanner 统一完成跨实现的引用校验和工具绑定。
 - 从 `path-template` 或 CSE URI template 的同名占位符自动识别 Path 参数；Query 和业务 Header 继续显式配置，排除这些参数后，将剩余工具参数按原名自动组装为展开的 JSON Body。
 - 配置中只声明来自工具参数的业务 Header；当前 MCP HTTP 请求中的其他 Header 除业务同名项和系统排除项外，默认原样透传到下游。
@@ -17,14 +17,16 @@
 - 删除没有实际消费场景的 `RemoteToolClient` 编程式注册路径，工具统一由 `@Tool` 声明。
 - 将最终绑定类型收敛为 `Tool.Type`，删除同时保存重复来源标识的 `ToolOrigin`；将只包装请求 Header 的 `ToolInvocationContext` 内联为不可变多值 Header 映射。
 - 将只复制 `@Tool` 四个行为属性的 `ToolHints` 内联到 `ToolRegistration`，减少重复模型和对象转换。
-- 合并 Servlet Header 提取与远程 Header 策略，收敛共享绑定工厂的命名和内部实现，同时保持 API Fabric/CSE handler 与 WebClient provider 两层扩展边界不变。
+- 合并 Servlet Header 提取与远程 Header 策略，收敛共享绑定工厂的命名和内部实现，同时保持 API Fabric/CSE handler 的独立扩展边界。
+- 共享绑定器按最终 `Tool.Type` 选择执行通道：API Fabric 使用 WebClient，CSE 使用可替换的 `CseRestTemplateProvider` 提供的 `RestOperations`；starter 只预留 CSE 接口和启动期缺失校验，不内置公司环境相关实现。
+- 统一使用英文生产运行时字符串，覆盖日志模板、异常消息和断言消息，禁止中文字符串经框架异常记录进入日志。
 - 将 multipart 文件上传记录为后续待办；本次变更只支持 JSON 请求体。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `remote-tool-routing`：定义注解工具的配置、启动绑定、请求参数位置、Header 透传、`WebClient` 调用、响应转换和校验行为。
+- `remote-tool-routing`：定义注解工具的配置、启动绑定、请求参数位置、Header 透传、API Fabric WebClient/CSE RestOperations 调用、响应转换和校验行为。
 
 ### Modified Capabilities
 
@@ -33,6 +35,6 @@
 ## Impact
 
 - 影响工具扫描、标准化调用、MCP transport context 提取、registry 调用处理、自动配置、配置属性与元数据、文档，以及同级的 `dataagent-mcp-test` 消费端应用。
-- 增加 `WebClient` 所需的 Spring WebFlux 客户端 API，同时保留现有基于 Servlet 的 MCP Server。
-- 引入可配置的 API Fabric/CSE 端点模型、可扩展的端点处理 SPI 和可替换的 WebClient/provider 边界，尤其用于支持非 HTTP `cse` URI scheme 的运行环境。
+- 增加 API Fabric 所需的 Spring WebFlux 客户端 API，同时保留现有基于 Servlet 的 MCP Server。
+- 引入可配置的 API Fabric/CSE 端点模型、可扩展的端点处理 SPI、独立 API Fabric WebClient 和 CSE RestTemplate provider 边界。
 - 不增加 Resources、Prompts、运行时目录修改、multipart 上传或固定 Header 配置。

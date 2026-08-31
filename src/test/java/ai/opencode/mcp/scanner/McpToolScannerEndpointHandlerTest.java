@@ -50,11 +50,11 @@ class McpToolScannerEndpointHandlerTest {
   @Test
   void rejectsReferenceWithoutAnnotatedTool() {
     McpToolScanner scanner = scanner(List.of(
-        new StubEndpointHandler("扩展端点", Set.of("missing"))));
+        new StubEndpointHandler("Custom endpoint", Set.of("missing"))));
 
     assertThatThrownBy(() -> scanner.scan(new LocalTools()))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("扩展端点", "missing", "没有对应注解工具");
+        .hasMessageContaining("Custom endpoint", "missing", "no matching annotated tool");
   }
 
   private static McpToolScanner scanner(List<RemoteToolEndpointHandler> handlers) {

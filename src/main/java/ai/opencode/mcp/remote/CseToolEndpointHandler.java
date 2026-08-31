@@ -10,6 +10,8 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import org.springframework.web.reactive.function.client.WebClient;
+
 /**
  * 保留完整 {@code cse://} URI 并绑定 CSE 远程工具端点。
  *
@@ -29,15 +31,17 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
    *
    * @param properties MCP 及 CSE 配置
    * @param objectMapper 应用的 Jackson 映射器
-   * @param clients 远程 WebClient 提供器
+   * @param apiFabricClient API Fabric WebClient
+   * @param cseClientProvider CSE RestTemplate 提供器
    */
   public CseToolEndpointHandler(
       McpFabricProperties properties,
       ObjectMapper objectMapper,
-      RemoteToolWebClientProvider clients) {
+      WebClient apiFabricClient,
+      CseRestTemplateProvider cseClientProvider) {
     this.properties = properties.getCse();
     this.bindingFactory = new RemoteToolBindingFactory(
-        objectMapper, clients, properties.getRequestTimeout());
+        objectMapper, apiFabricClient, cseClientProvider, properties.getRequestTimeout());
   }
 
   /**
@@ -72,7 +76,7 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
     String reference = registration.name();
     McpFabricProperties.CseEndpoint endpoint = properties.getEndpoints().get(reference);
     if (endpoint == null) {
-      throw new IllegalArgumentException("CSE 端点 ref=" + reference + ": 未配置该引用");
+      throw new IllegalArgumentException("CSE endpoint ref=" + reference + ": reference is not configured");
     }
     return bindingFactory.bind(
         endpointType(), method, registration, endpoint, endpoint.getUriTemplate(),

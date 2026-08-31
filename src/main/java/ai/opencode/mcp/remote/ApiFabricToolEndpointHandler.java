@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClient;
 
 /**
  * 使用共享基础 URL 解析并绑定 API Fabric 远程工具端点。
@@ -33,15 +34,17 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
    *
    * @param properties MCP 及 API Fabric 配置
    * @param objectMapper 应用的 Jackson 映射器
-   * @param clients 远程 WebClient 提供器
+   * @param apiFabricClient API Fabric WebClient
+   * @param cseClientProvider CSE RestTemplate 提供器
    */
   public ApiFabricToolEndpointHandler(
       McpFabricProperties properties,
       ObjectMapper objectMapper,
-      RemoteToolWebClientProvider clients) {
+      WebClient apiFabricClient,
+      CseRestTemplateProvider cseClientProvider) {
     this.properties = properties.getApiFabric();
     this.bindingFactory = new RemoteToolBindingFactory(
-        objectMapper, clients, properties.getRequestTimeout());
+        objectMapper, apiFabricClient, cseClientProvider, properties.getRequestTimeout());
   }
 
   /**
@@ -77,7 +80,7 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
     String reference = registration.name();
     McpFabricProperties.ApiFabricEndpoint endpoint = properties.getEndpoints().get(reference);
     if (endpoint == null) {
-      throw new IllegalArgumentException("API Fabric 端点 ref=" + reference + ": 未配置该引用");
+      throw new IllegalArgumentException("API Fabric endpoint ref=" + reference + ": reference is not configured");
     }
     String pathTemplate = endpoint.getPathTemplate();
     validatePathTemplate(reference, pathTemplate);
@@ -90,7 +93,7 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
     if (!StringUtils.hasText(pathTemplate)
         || !pathTemplate.startsWith("/")
         || pathTemplate.startsWith("//")) {
-      fail(reference, "path-template 必须是以单个 / 开头的路径");
+      fail(reference, "path-template must start with exactly one /");
     }
   }
 
@@ -100,22 +103,22 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
     }
     String baseUrl = properties.getBaseUrl();
     if (!StringUtils.hasText(baseUrl)) {
-      fail("base-url", "不能为空");
+      fail("base-url", "must not be blank");
     }
     try {
       URI uri = URI.create(baseUrl);
       if (!uri.isAbsolute()) {
-        fail("base-url", "必须是绝对 URI");
+        fail("base-url", "must be an absolute URI");
       }
       if (!Set.of("http", "https").contains(uri.getScheme().toLowerCase(Locale.ROOT))) {
-        fail("base-url", "必须使用 http 或 https scheme");
+        fail("base-url", "must use the http or https scheme");
       }
     } catch (IllegalArgumentException exception) {
-      fail("base-url", "非法 URI");
+      fail("base-url", "is an invalid URI");
     }
   }
 
   private static void fail(String reference, String detail) {
-    throw new IllegalStateException("API Fabric 端点 ref=" + reference + ": " + detail);
+    throw new IllegalStateException("API Fabric endpoint ref=" + reference + ": " + detail);
   }
 }
