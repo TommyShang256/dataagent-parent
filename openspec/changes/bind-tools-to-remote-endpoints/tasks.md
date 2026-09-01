@@ -105,3 +105,7 @@
 - [x] 17.1 增加编译后签名约束测试，覆盖 starter 与消费端生产、测试类的非 synthetic 方法和构造器，确保参数数量最多为 5
 - [x] 17.2 使用有明确职责的嵌套不可变值重构注册、审计和远程绑定签名，拆分测试高参数方法并收敛消费端代理工具参数，同时保持远程请求、响应、Schema 和审计行为
 - [x] 17.3 更新验证材料，执行 starter 与消费端 clean verify、JavaDoc、严格 OpenSpec、生产字符串、结构、JAR、diff 和 Git 暂存检查
+
+## 18. 真实 MCP Client 端到端验证
+
+- [x] 18.1 在 starter 测试路径中启动真实本地 HTTP mock 作为 API Fabric，启动随机端口的 MCP Server，并使用同级 `opencode` 仓库的 MCP client 完成 initialize、`tools/list` 和 `tools/call`；验证标准 MCP 请求能触发 API Fabric HTTP 请求，且 method、URI、Header、Body 与结构化响应均正确

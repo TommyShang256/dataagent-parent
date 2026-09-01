@@ -113,3 +113,157 @@ WebClient 和 RestOperations。生产源码由 18 个减少为 17 个，编译�
 remote 包保持 5 个生产源码、785 行和 11 个编译类。starter JAR 共 40 个 class，只包含
 `RemoteToolInvokerBinder` 及其嵌套计划类型，不包含旧 `RemoteToolBindingFactory`、`RemoteToolBinder`、
 `CseRestTemplateProvider` 或其他陈旧类。
+
+## opencode 真实 MCP Client 调测记录
+
+### 调测目标与拓扑
+
+本轮不使用直接调用 registry 或捕获式 WebClient 替身，而是验证完整网络链路：
+
+```text
+opencode MCPClient
+  -> initialize
+  -> tools/list
+  -> tools/call(create_order)
+  -> dataagent-mcp /rest/mcp
+  -> ApiFabricToolEndpointHandler WebClient
+  -> JDK HttpServer API Fabric mock
+  -> JSON response
+  -> MCP CallToolResult
+```
+
+自动化入口为
+`src/test/java/ai/opencode/mcp/ApiFabricOpenCodeE2eTest.java`。测试启动两个随机本地端口，
+避免依赖固定端口或已有进程：一个运行 Spring Servlet MCP Server，另一个运行 JDK
+`HttpServer` API Fabric mock。
+
+### 客户端与环境
+
+- 日期：2026-09-01，时区 `Asia/Shanghai`。
+- dataagent-mcp：当前仓库源码，MCP 端点 `/rest/mcp`。
+- opencode：`/Users/tommy/projects/opencode`，分支 `v2`；测试直接使用
+  `packages/core/src/mcp/client.ts` 导出的 `MCPClient`。
+- opencode 远程 MCP 配置：`ConfigMCP.Remote`，URL 指向当次启动的
+  `http://127.0.0.1:<random>/rest/mcp`，`oauth=false`。
+- 客户端 Header：`X-Trace-Id: opencode-e2e`，用于验证 MCP HTTP 入站 Header 能透传到 API Fabric。
+- Java：OpenJDK `26.0.2.1`，Maven 使用 `release 21` 编译。
+- Bun：使用当前 shell 中可执行的 `bun`。
+- Maven：系统 `PATH` 中没有 `mvn`；本次将 Apache Maven `3.9.11` 解压到
+  `/tmp/dataagent-maven.USrwT0`，不修改系统安装或仓库构建配置。
+
+opencode 客户端的关键配置与标准请求为：
+
+```typescript
+new ConfigMCP.Remote({
+  type: "remote",
+  url: process.env.MCP_E2E_URL,
+  oauth: false,
+  headers: { "X-Trace-Id": "opencode-e2e" },
+})
+
+connection.tools()
+connection.callTool({
+  name: "create_order",
+  args: {
+    orderId: "O-1",
+    verbose: true,
+    bizMode: "preview",
+    customerId: "C-1",
+  },
+})
+```
+
+`MCPClient.connect` 在返回 connection 前执行 MCP initialize，`connection.tools()` 发起
+`tools/list`，`connection.callTool()` 发起 `tools/call`。Server 实际日志确认客户端名为
+`opencode`，协议版本为 `2025-11-25`。测试环境将 Spring shutdown phase 超时设为 1 秒，
+避免 Streamable HTTP 长连接在 context 关闭时消耗默认 30 秒；该设置不进入生产配置。
+
+### API Fabric mock 契约
+
+MCP Server 中的 `create_order` 注解方法保留一个主动失败的方法体，用于证明远程绑定后没有
+执行本地 Java 方法。端点配置将 `orderId` 用于 Path，`verbose` 用于 Query，`bizMode`
+用于业务 Header，剩余 `customerId` 自动进入 JSON Body。
+
+实际被断言的下游请求为：
+
+```http
+POST /api/orders/O-1?verbose=true
+X-Trace-Id: opencode-e2e
+X-Biz-Mode: preview
+Content-Type: application/json
+
+{"customerId":"C-1"}
+```
+
+mock 返回：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"id":"O-1","status":"created"}
+```
+
+opencode 观察到的工具目录包含 `create_order`，调用结果为 `isError=false`，文本内容反序列化后为：
+
+```json
+{"id":"O-1","status":"created"}
+```
+
+### 执行命令与结果
+
+首次尝试使用 `mvn -Dtest=ApiFabricOpenCodeE2eTest test`，shell 返回 `command not found: mvn`。
+确认项目没有 Maven Wrapper 后，改用临时 Maven：
+
+```shell
+/tmp/dataagent-maven.USrwT0/apache-maven-3.9.11/bin/mvn \
+  -Dtest=ApiFabricOpenCodeE2eTest test
+```
+
+实际结果：
+
+```text
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+Total time: 33.259 s
+Finished at: 2026-09-01T10:21:24+08:00
+```
+
+随后首次执行全量 `clean verify` 时，端到端测试仍然通过，但后续
+`LoggingLanguageTest.auditLoggerFormatsEnglishTemplate` 失败。根因是端到端测试为减少输出设置了
+`logging.level.root=OFF`，Spring context 关闭后没有还原全局 Logback 根级别，使下一个测试无法捕获
+审计日志。修正方式是删除该全局日志配置，保持测试之间的日志状态隔离；不改动生产代码。
+
+最终门禁结果：
+
+```text
+mvn clean verify
+Tests run: 54, Failures: 0, Errors: 0, Skipped: 0
+ApiFabricOpenCodeE2eTest: 2.269 s
+BUILD SUCCESS
+Total time: 4.832 s
+Finished at: 2026-09-01T10:26:33+08:00
+
+mvn javadoc:javadoc
+BUILD SUCCESS
+Total time: 1.237 s
+
+openspec validate bind-tools-to-remote-endpoints --strict
+Change 'bind-tools-to-remote-endpoints' is valid
+
+git diff --check
+passed
+```
+
+JavaDoc 生成保留了项目已有的 10 个“默认构造器没有注释”警告，没有新增 JavaDoc 错误，
+命令成功退出。JAR 内容检查确认新增端到端测试只存在于 `target/test-classes`，未进入
+`dataagent-mcp-0.1.0-SNAPSHOT.jar`。
+
+测试在同级 `../opencode` 不存在或 Bun 不可用时使用 JUnit assumption 明确跳过，以保持独立
+starter 构建可运行；本次实际执行环境中两项依赖均存在，因此结果为真实执行而非跳过。
+
+### 结论
+
+opencode V2 能将当前 dataagent-mcp 配置为远程 MCP Server，完成标准 initialize、
+`tools/list` 和 `tools/call`。`tools/call` 能经由当前 API Fabric handler 发起真实 HTTP
+请求，且 Path、Query、业务 Header、透传 Header、JSON Body 和返回类型转换均与当前设计一致。
