@@ -68,9 +68,7 @@ starter 创建两个标准 Streamable HTTP MCP 入口：`/rest/mcp` 固定绑定
 `SCRIPT`。Tool 只发布到 `allowedCallers` 包含的入口，共享 Tool 发布到两个入口；因此 Agent 看不到 Script-only
 Tool，Script 也看不到 Agent-only Tool。每次 `tools/call` 仍会在 invoker 前重新校验入口调用者。
 
-客户端不得在 `_meta` 中声明 `ai.opencode.dataagent/caller`，该保留字段会被拒绝。Script 调用需要在 `_meta` 中提供
-`skill-id`、`script-id`、`parent-call-id` 和 `trace-id` 审计链；这些字段不会进入业务 arguments、远程 Path、
-Query、Header、JSON Body 或 multipart part。Opencode 保持连接 Agent 入口，无需修改源码；Script 使用任意标准
+客户端元数据不参与 caller 判定。Script 调用不需要 Skill ID、Script ID、父调用或 Trace 来源字段，无状态 CLI 只需发送包含业务 arguments 的标准 `tools/call`。Opencode 保持连接 Agent 入口，无需修改源码；Script 使用任意标准
 MCP Client 连接 Script 入口。
 
 入口绑定负责 Tool 授权来源，不等于客户端身份认证。生产部署必须由网关、Spring Security、OAuth、mTLS 或网络

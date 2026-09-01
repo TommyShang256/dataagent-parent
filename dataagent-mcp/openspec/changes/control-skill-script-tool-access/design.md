@@ -10,17 +10,27 @@ DataAgent BFF 当前使用官方 MCP Java SDK，通过一个固定 Streamable HT
 - Agent 与 Script 使用标准 MCP 协议访问同一份 Tool 注册。
 - 服务端按入口确定可信调用者，并为两类调用者发布隔离目录。
 - Tool 的 `allowedCallers` 在目录发布和实际执行两处生效。
-- Script 的 Skill、Script、父调用和 Trace 上下文不污染业务参数或下游请求。
+- Script 使用无状态标准 MCP 调用，不定义 Skill、Script、父调用和 Trace 来源协议。
 
 **Non-Goals:**
 
 - starter 不实现 OAuth、Token 签发、mTLS 或网关身份认证。
 - 不修改 Opencode 的 Skill 定义、Tool Registry、CodeMode 或 MCP Client。
 - 不在 MCP Server 内执行或分发 Skill/Script 文件。
-- 不把客户端提供的 Skill/Script ID 当作已认证身份；这些字段只用于审计关联。
+- 不在 MCP Server 中定义或校验 Skill/Script 运行时标识。
 - 不新增非标准 Script HTTP 工具调用接口。
 
 ## Decisions
+
+### 0. Script Runner 部署与职责
+
+父工程新增 `dataagent-runner` 模块。构建产物只包含单文件 `bin/dataagent-runner` 和中文使用手册，解压后只需把 `bin` 加入 `PATH`。Runner 使用 Linux Shell 启动内嵌的 Python 标准库实现，不依赖 jq、curl、pip、JAR 或第三方 Python 包；它是一次性标准 MCP Client，不依赖 Opencode MCP 配置，也不保存 Session、目录、Skill ID、Script ID 或调用历史。
+
+Runner 从 `POD_IP` 与 `POD_PORT` 构造 `http://${POD_IP}:${POD_PORT}/rest/mcp/script`。地址不允许通过 CLI 覆盖，也不回退到 localhost；Opencode 的 4096 端口不参与 Runner 到 BFF 的通信。BFF 需要监听 `0.0.0.0`。
+
+CLI 保持两个入口：`dataagent-runner --list` 查询完整 Script 目录，`dataagent-runner <tool-name> [arguments-json]` 调用工具；第二个参数为 `-` 时从 stdin 读取 JSON。调用前必须遍历全部 `tools/list` 分页并精确检查工具名，工具不存在时不得发送 `tools/call`。
+
+Runner 不提供通用 `--header`。原始 HTTP 业务 Header 继续作为 Tool arguments，由 BFF `headers.business` 映射；MCP 协议 Header 和 Session ID 由 Runner 的协议实现自动管理。未来身份认证 Header 必须由部署环境自动提供，不能混入业务参数。
 
 ### 1. 使用两个标准 MCP 入口绑定调用来源
 
@@ -36,9 +46,9 @@ Agent 入口保持 `/rest/mcp`，Script 入口默认为 `/rest/mcp/script`，两
 
 ### 3. caller 不再属于客户端元数据
 
-`ai.opencode.dataagent/caller` 成为保留键。客户端发送该键时调用失败，错误明确说明 caller 由 MCP endpoint 决定。缺少该键是正常标准调用，不再代表兼容性推断。
+caller 不定义客户端元数据 key，Tool call handler 只使用 MCP endpoint 创建时绑定的值。其他自定义 `_meta` 不参与 caller 解析或兼容性推断。
 
-Script 入口要求 `_meta` 提供 `skill-id`、`script-id`、`parent-call-id` 与 `trace-id`，用于完整审计。Agent 入口不得携带这些 Script 链路字段。上述字段不进入 Tool arguments、Header 透传或 API Fabric/CSE 参数绑定。
+Script 入口不解析 Skill ID、Script ID、父调用或 Trace 元数据。计划中的 Runner 是用完即退出的无状态 CLI，每次只需建立标准 MCP Client 调用，不维护 Skill/Script 执行链或自定义 `_meta` 协议。审计仅记录 endpoint 绑定的 `AGENT` 或 `SCRIPT`。
 
 ### 4. Opencode 零改造，Script 独立使用标准 Client
 
@@ -72,7 +82,7 @@ starter 与 BFF 统一使用 `dataagent.mcp` 作为 Spring 配置命名空间，
 
 - [两个 MCP endpoint 增加一个 transport 和 server 实例] → 两者共享同一 Tool 注册与 invoker，只隔离协议 session 和目录。
 - [共享 Tool specification 发布两次] → 启动审计按逻辑 Tool 记录一次，发布回滚按 Server/Tool 对执行。
-- [Script 可伪造其他 Skill/Script ID] → 这些字段仅用于审计，不参与身份认证；需要脚本级强身份时由认证层把身份映射到独立入口或后续扩展受认证主体上下文。
+- [无状态 CLI 不提供 Skill/Script 级身份] → 当前权限粒度明确为 Agent/Script；如后续需要脚本级强身份，由认证层扩展受认证主体上下文。
 - [Script endpoint 被匿名访问] → 文档和配置明确要求部署层保护该路径，starter 不制造弱 Token 机制。
 - [不修改 Opencode 后失去客户端侧权限预检] → 服务端目录隔离减少不可用 Tool 暴露，执行期授权作为最终安全边界。
 
@@ -81,7 +91,7 @@ starter 与 BFF 统一使用 `dataagent.mcp` 作为 Spring 配置命名空间，
 1. 更新提案，移除 Opencode Runner、Schema 和 caller 注入设计。
 2. 在 starter 增加 Script endpoint 配置与两套标准 MCP transport/server。
 3. 注册表按 `allowedCallers` 向对应 Server 发布，并由 handler 固定调用者。
-4. 调整来源解析，拒绝客户端 caller，仅保留 Script 审计链。
+4. 删除客户端来源解析和 `ToolCallSource`，审计仅保留 endpoint 绑定 caller。
 5. 使用两个官方 MCP Client 完成 Agent、Script、共享 Tool 与越权目录回归。
 6. 精确撤销 Opencode 仓库中本需求产生的全部改动。
 7. 将 starter、BFF、测试和文档中的配置命名空间统一迁移到 `dataagent.mcp`。

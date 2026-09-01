@@ -54,31 +54,28 @@ BFF SHALL 在本地 Tool 方法、API Fabric 或 CSE 执行前，重新检查 en
 - **THEN** BFF 返回英文权限错误
 - **AND** Tool invoker 与下游请求均不执行
 
-### Requirement: 客户端不得覆盖调用者
+### Requirement: 客户端元数据不得参与调用者判定
 
-`ai.opencode.dataagent/caller` SHALL 是保留元数据键。任何客户端发送该键时，BFF MUST 拒绝调用；错误 MUST 说明调用者由 MCP endpoint 决定。
+BFF SHALL 只使用 MCP endpoint 绑定的 caller，不得定义或读取客户端 caller 元数据协议字段。
 
-#### Scenario: Script 伪造 caller 被拒绝
-- **WHEN** Agent 或 Script 请求在 `_meta` 中声明 caller
-- **THEN** BFF 在业务处理器前拒绝请求
-- **AND** endpoint 的绑定调用者保持不变
+#### Scenario: 非来源元数据不改变 caller
+- **WHEN** Agent 或 Script 请求携带与 Script 来源无关的自定义 `_meta`
+- **THEN** BFF 仍使用 endpoint 绑定的 caller
+- **AND** 不存在客户端可写的 caller 协议字段
 
-### Requirement: Script 来源链必须独立于业务参数
+### Requirement: Script 调用必须保持无状态
 
-Script 调用 SHALL 在 `_meta` 中提供 Skill ID、Script ID、父调用 ID 与 Trace ID。Agent 调用 MUST NOT 提供这些字段。来源字段 MUST NOT 进入 Tool arguments 或 API Fabric/CSE 的 Path、Query、Header、JSON Body 与 multipart part。
+Script 调用 SHALL 使用标准 MCP `tools/call`，BFF MUST NOT 要求 Skill ID、Script ID、父调用 ID、Trace ID 或其他自定义来源元数据。审计 SHALL 仅使用 endpoint 绑定的 caller 区分 Agent 与 Script。
 
-#### Scenario: Script 完整来源被审计
-- **WHEN** Script endpoint 收到完整来源链并成功调用共享或 Script-only Tool
-- **THEN** 审计记录 caller 为 `SCRIPT` 及全部链路字段
-- **AND** 业务参数保持原 Schema
+#### Scenario: 无来源元数据的 Script 调用成功
+- **WHEN** 无状态 CLI 连接 Script endpoint 并发送不含自定义 `_meta` 的 `tools/call`
+- **THEN** BFF 按 `SCRIPT` 执行目录和运行期授权
+- **AND** 审计记录 caller 为 `SCRIPT`
 
-#### Scenario: Script 来源不完整被拒绝
-- **WHEN** Script endpoint 缺少任一来源链字段
-- **THEN** BFF 在 invoker 前返回英文错误
-
-#### Scenario: Agent 携带 Script 来源被拒绝
-- **WHEN** Agent endpoint 请求携带任一 Script 来源字段
-- **THEN** BFF 在 invoker 前返回英文错误
+#### Scenario: 业务参数保持原 Schema
+- **WHEN** Agent 或 Script 调用 Tool
+- **THEN** Tool arguments 仅包含 Tool Schema 定义的业务参数
+- **AND** API Fabric/CSE 的 Path、Query、Header、JSON Body 与 multipart part 映射不变
 
 ### Requirement: 入口保护必须保持外置
 

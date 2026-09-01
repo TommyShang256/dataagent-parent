@@ -2,7 +2,6 @@ package ai.opencode.mcp.registry;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.api.ToolInvoker;
-import ai.opencode.mcp.api.ToolCallSource;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
@@ -31,6 +30,8 @@ import java.util.function.Supplier;
 @Slf4j
 @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
 public final class McpToolRegistry implements SmartInitializingSingleton {
+
+    static final String ALLOWED_CALLERS_META_KEY = "ai.opencode.dataagent/allowed-callers";
 
     private final Supplier<List<ToolRegistration>> discovery;
 
@@ -143,7 +144,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
                 @Override
                 public Object invoke(Map<String, Object> arguments) throws Exception {
                     return McpToolRegistry.this.invoke(
-                            registration, arguments, Map.of(), ToolCallSource.from(Map.of()));
+                            registration, arguments, Map.of(), Tool.Caller.AGENT);
                 }
 
                 /**
@@ -157,15 +158,15 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
                 @Override
                 public Object invoke(Map<String, Object> arguments, Map<String, List<String>> headers) throws Exception {
                     return McpToolRegistry.this.invoke(
-                            registration, arguments, headers, ToolCallSource.from(Map.of()));
+                            registration, arguments, headers, Tool.Caller.AGENT);
                 }
 
                 /**
-                 * 使用独立调用来源执行工具并记录审计事件。
+                 * 使用 endpoint 绑定调用者执行工具并记录审计事件。
                  *
                  * @param arguments 工具参数
                  * @param headers 当前请求的不可变多值 Header
-                 * @param source 不进入业务参数的调用来源
+                 * @param caller endpoint 绑定的调用者
                  * @return 工具执行结果
                  * @throws Exception 工具执行失败时抛出
                  */
@@ -173,8 +174,8 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
                 public Object invoke(
                         Map<String, Object> arguments,
                         Map<String, List<String>> headers,
-                        ToolCallSource source) throws Exception {
-                    return McpToolRegistry.this.invoke(registration, arguments, headers, source);
+                        Tool.Caller caller) throws Exception {
+                    return McpToolRegistry.this.invoke(registration, arguments, headers, caller);
                 }
             });
             ToolRegistration existing = normalized.putIfAbsent(audited.name(), audited);
@@ -201,14 +202,14 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
             ToolRegistration registration,
             Map<String, Object> arguments,
             Map<String, List<String>> headers,
-            ToolCallSource source) throws Exception {
+            Tool.Caller caller) throws Exception {
         long started = System.nanoTime();
         try {
             Object result = registration.invoker().invoke(arguments, headers);
-            audit(registration, ToolAuditEvent.Operation.INVOKE, details(started, arguments, result, null, source));
+            audit(registration, ToolAuditEvent.Operation.INVOKE, details(started, arguments, result, null, caller));
             return result;
         } catch (Exception exception) {
-            audit(registration, ToolAuditEvent.Operation.INVOKE, details(started, arguments, null, exception, source));
+            audit(registration, ToolAuditEvent.Operation.INVOKE, details(started, arguments, null, exception, caller));
             throw exception;
         }
     }
@@ -232,7 +233,7 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
                 .description(registration.description())
                 .annotations(annotations)
                 .meta(Map.of(
-                        ToolCallSource.ALLOWED_CALLERS_META_KEY,
+                        ALLOWED_CALLERS_META_KEY,
                         registration.allowedCallers().stream()
                                 .map(allowedCaller -> allowedCaller.name().toLowerCase(Locale.ROOT))
                                 .sorted()
@@ -243,50 +244,38 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
                 .callHandler((exchange, request) -> call(
                         registration,
                         request.arguments(),
-                        request.meta(),
                         exchange == null ? Map.of() : RemoteRequestHeaders.from(exchange.transportContext()),
                         caller))
                 .build();
     }
 
     McpSchema.CallToolResult call(ToolRegistration registration, Map<String, Object> arguments) {
-        return call(registration, arguments, Map.of(), Map.of());
+        return call(registration, arguments, Map.of(), Tool.Caller.AGENT);
     }
 
     McpSchema.CallToolResult call(
             ToolRegistration registration,
             Map<String, Object> arguments,
             Map<String, List<String>> headers) {
-        return call(registration, arguments, Map.of(), headers);
+        return call(registration, arguments, headers, Tool.Caller.AGENT);
     }
 
     McpSchema.CallToolResult call(
             ToolRegistration registration,
             Map<String, Object> arguments,
-            Map<String, Object> meta,
-            Map<String, List<String>> headers) {
-        return call(registration, arguments, meta, headers, Tool.Caller.AGENT);
-    }
-
-    McpSchema.CallToolResult call(
-            ToolRegistration registration,
-            Map<String, Object> arguments,
-            Map<String, Object> meta,
             Map<String, List<String>> headers,
             Tool.Caller caller) {
         long started = System.nanoTime();
-        ToolCallSource source = null;
         try {
-            source = ToolCallSource.from(meta, caller);
-            authorize(registration, source);
+            authorize(registration, caller);
         } catch (Exception exception) {
             audit(registration, ToolAuditEvent.Operation.INVOKE,
-                    details(started, arguments, null, exception, source));
+                    details(started, arguments, null, exception, caller));
             return error(exception);
         }
         try {
             Object result = registration.invoker().invoke(
-                    arguments == null ? Map.of() : arguments, headers, source);
+                    arguments == null ? Map.of() : arguments, headers, caller);
             if (result instanceof McpSchema.CallToolResult callToolResult) {
                 return callToolResult;
             }
@@ -307,10 +296,10 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
                 .build();
     }
 
-    private static void authorize(ToolRegistration registration, ToolCallSource source) {
-        if (!registration.allowedCallers().contains(source.caller())) {
+    private static void authorize(ToolRegistration registration, Tool.Caller caller) {
+        if (!registration.allowedCallers().contains(caller)) {
             throw new SecurityException("MCP tool caller is not allowed: tool=" + registration.name()
-                    + ", caller=" + source.caller());
+                    + ", caller=" + caller);
         }
     }
 
@@ -336,13 +325,13 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
             Map<String, Object> arguments,
             Object result,
             Exception exception,
-            ToolCallSource source) {
+            Tool.Caller caller) {
         return new ToolAuditEvent.Details(
                 Duration.ofNanos(System.nanoTime() - started),
                 arguments,
                 result,
                 exception == null ? null : exception.getClass().getName(),
-                source);
+                caller);
     }
 
     private static String errorMessage(Exception exception) {

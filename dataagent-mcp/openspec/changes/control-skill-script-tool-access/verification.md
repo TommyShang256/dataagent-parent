@@ -8,8 +8,8 @@
 - Script endpoint：`/rest/mcp/script`，服务端固定绑定 `SCRIPT`；
 - 两个入口分别运行官方 Streamable HTTP MCP transport 和独立 session；
 - Tool 扫描和业务 invoker 只有一份，按 `allowedCallers` 发布到对应目录；
-- caller 不由客户端 `_meta` 决定，客户端声明保留 caller 会在 invoker 前失败；
-- Script 的 Skill、Script、父调用和 Trace 字段只用于审计，不进入业务参数或下游请求；
+- caller 只由 endpoint 决定，客户端元数据不参与 caller 判定；
+- Script 不要求 Skill、Script、父调用或 Trace 来源字段，无状态 CLI 可直接发送标准 `tools/call`；
 - starter 与 BFF 配置统一使用 `dataagent.mcp`，不保留 `opencode.mcp` 兼容绑定；
 - `/Users/tommy/projects/opencode` 已恢复到仓库 `HEAD`，工作区完全干净。
 
@@ -46,12 +46,24 @@
 
 1. 完成标准 initialize 和 `tools/list`；
 2. 目录只包含 `upload_table` 与 `validate_table`；
-3. `_meta` 携带 `skill-id`、`script-id`、`parent-call-id` 与 `trace-id`；
+3. `tools/call` 不携带自定义来源 `_meta`；
 4. 成功调用共享 multipart Tool 和 Script-only JSON Tool；
-5. 审计记录 `caller=SCRIPT` 及完整来源链；
-6. 文件、普通参数、来源元数据和远程结果均符合预期。
+5. 审计仅记录 `caller=SCRIPT`；
+6. 文件、普通参数和远程结果均符合预期。
 
 Script 请求没有专用 Token、环境变量、私有 Header 或非标准 HTTP API。
+
+### 3.3 单文件 Script Runner
+
+`dataagent-runner` 使用 `/bin/sh` 启动内嵌 Python 3 标准库实现，不依赖 jq、curl、pip、JAR 或第三方
+Python 包。自动化验证了以下链路：
+
+1. `--list` 完成 initialize、initialized notification 和全部 `tools/list` 分页；
+2. MCP Session ID 与协商后的协议版本 Header 会在后续请求中自动携带；
+3. 工具调用前按区分大小写的名称精确预检，不存在的工具不发送 `tools/call`；
+4. JSON 位置参数、stdin、同名 Header/Body Tool 参数、JSON 与 SSE 响应均可正确处理；
+5. Shell Runner 连接真实启动的 BFF Script endpoint，调用 `validate_table` 后 API Fabric mock 收到一次请求，
+   审计为 `caller=SCRIPT`。
 
 ## 4. 拒绝路径
 
@@ -61,18 +73,16 @@ Script 请求没有专用 Token、环境变量、私有 Header 或非标准 HTTP
 | --- | --- | --- |
 | Agent 调用 Script-only Tool | Agent MCP 目录 | JSON-RPC `Unknown tool`，下游零调用 |
 | Script 调用 Agent-only Tool | Script MCP 目录 | JSON-RPC `Unknown tool`，下游零调用 |
-| 客户端声明 `ai.opencode.dataagent/caller` | call handler 来源解析 | `isError=true`，提示 caller 由 endpoint 决定 |
-| Script 缺少来源链字段 | call handler 来源解析 | `isError=true`，提示需要完整来源链 |
 | 绕过目录使用错误 caller | 注册表执行期授权 | `SecurityException`，invoker 不执行 |
 | Agent 与 Script endpoint 配置相同 | Spring 启动期 | 应用启动失败并指出冲突路径 |
 
-来源字段没有进入 Tool input Schema、arguments、普通透传 Header、Path、Query、JSON Body 或 multipart part。客户端 caller 覆盖失败时，审计不会把伪造值记录为有效来源。
+caller 不进入 Tool input Schema、arguments、普通透传 Header、Path、Query、JSON Body 或 multipart part。MCP Server 不定义或解析 Skill/Script 来源字段。
 
 ## 5. 身份认证边界
 
 双入口把服务端授权来源固定为 Agent 或 Script，但路径本身不是身份凭证。生产部署必须在 MCP Servlet 之前使用网关、Spring Security、OAuth scope、mTLS 或网络策略保护 `/rest/mcp/script`，只允许可信 Script workload 访问。
 
-如果匿名暴露 Script endpoint，其他客户端也可以主动访问该路径；此时 Tool 目录和执行期策略仍按 `SCRIPT` 正确生效，但系统无法证明请求来自某个真实 Script。Skill/Script ID 目前只用于审计关联，不作为已认证主体。
+如果匿名暴露 Script endpoint，其他客户端也可以主动访问该路径；此时 Tool 目录和执行期策略仍按 `SCRIPT` 正确生效，但系统无法证明请求来自某个真实 Script。当前认证与授权粒度明确为 Agent/Script，不提供 Skill/Script 级身份。
 
 ## 6. 自动化与质量门禁
 
@@ -88,10 +98,11 @@ Script 请求没有专用 Token、环境变量、私有 Header 或非标准 HTTP
 
 | 模块 | 测试 | 失败 | 错误 | 跳过 | 指令覆盖率 | 分支覆盖率 | 行覆盖率 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `dataagent-mcp` | 86 | 0 | 0 | 0 | 95.90% | 92.02% | 95.89% |
+| `dataagent-mcp` | 83 | 0 | 0 | 0 | 95.87% | 91.53% | 95.85% |
 | `dataagent-web` | 16 | 0 | 0 | 0 | 100.00% | 无生产分支 | 100.00% |
+| `dataagent-runner` | 9 | 0 | 0 | 0 | 单文件协议测试 | 单文件协议测试 | 单文件协议测试 |
 
-回归覆盖 JSON、同名 Header/Body、普通 Header 透传、API Fabric、CSE、multipart 文件、`@RequestParam`、文本 `@RequestPart`、目录隔离、来源审计与拒绝下游零调用。所有测试方法继续由策略测试检查 `@DisplayName`。
+回归覆盖 JSON、同名 Header/Body、普通 Header 透传、API Fabric、CSE、multipart 文件、`@RequestParam`、文本 `@RequestPart`、目录隔离、caller 审计与拒绝下游零调用。所有测试方法继续由策略测试检查 `@DisplayName`。
 
 ### 6.2 JavaDoc
 
@@ -115,7 +126,10 @@ openspec validate control-skill-script-tool-access --strict
 
 ### 6.4 构件检查
 
-starter JAR 包含 `ToolCallSource`、`McpToolRegistry`、双 Server 自动配置和 `spring-configuration-metadata.json`；BFF 可执行 JAR 包含 `mcp-config.yml` 与最新 `dataagent-mcp` 依赖。配置元数据和示例配置均使用 `dataagent.mcp`。
+starter JAR 包含 `McpToolRegistry`、双 Server 自动配置和 `spring-configuration-metadata.json`，不再包含 `ToolCallSource`；BFF 可执行 JAR 包含 `mcp-config.yml` 与最新 `dataagent-mcp` 依赖。配置元数据和示例配置均使用 `dataagent.mcp`。
+
+Runner 同时生成 ZIP 与 TAR.GZ。两个归档的业务内容只有权限为 `0755` 的
+`bin/dataagent-runner` 和中文 README；Runner 直接执行 `--version` 成功。
 
 ## 7. Opencode 回退证明
 
@@ -126,8 +140,8 @@ git status --short
 git diff --check
 ```
 
-两条命令均无输出。此前新增的 Skill Script Runner、Schema、Tool Registry、MCP `_meta`、测试、依赖、OpenSpec 和设计文档修改已全部撤销；端到端测试使用的就是未修改 Opencode Client。
+两条命令均无输出。此前在 Opencode 内新增的 Skill Script Runner、Schema、Tool Registry、MCP `_meta`、测试、依赖和文档修改已全部撤销；独立 Runner 位于 DataAgentSelf 工程，Agent 端到端测试使用的仍是未修改 Opencode Client。
 
 ## 8. 最终结论
 
-当前实现满足“Opencode 零改造、Agent 与 Script 复用 DataAgent 统一 Tool 管理、每个 Tool 支持 Agent-only、Script-only 或共享、使用标准 MCP 请求”的目标。服务端目录隔离负责减少暴露面，执行期授权负责最终防御，部署层负责确认谁有权进入 Script endpoint，三者职责没有混用。
+当前实现满足“Opencode 零改造、Agent 与 Script 复用 DataAgent 统一 Tool 管理、每个 Tool 支持 Agent-only、Script-only 或共享、使用标准 MCP 请求”的目标。Script 可通过开箱即用的单文件 Runner 查询和调用工具，运行环境无需 jq 或额外依赖。服务端目录隔离负责减少暴露面，执行期授权负责最终防御，部署层负责确认谁有权进入 Script endpoint，三者职责没有混用。

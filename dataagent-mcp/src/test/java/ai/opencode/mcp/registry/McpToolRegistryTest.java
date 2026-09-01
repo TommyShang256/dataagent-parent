@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.api.ToolInvoker;
-import ai.opencode.mcp.api.ToolCallSource;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
@@ -145,7 +144,7 @@ class McpToolRegistryTest {
         assertText(registry.call(registration("null", arguments -> null), Map.of()), "null", false);
         assertText(registry.call(
                 registration("null-arguments", arguments -> arguments.isEmpty() ? "empty" : "unexpected"),
-                null, Map.of(), Map.of()), "empty", false);
+                null, Map.of()), "empty", false);
 
         var nativeResult = McpSchema.CallToolResult.builder()
                 .content(List.of(McpSchema.TextContent.builder("native").build())).isError(false).build();
@@ -185,7 +184,7 @@ class McpToolRegistryTest {
         assertThat(specification.tool().annotations().idempotentHint()).isTrue();
         assertThat(specification.tool().annotations().openWorldHint()).isFalse();
         assertThat(specification.tool().meta()).containsEntry(
-                ToolCallSource.ALLOWED_CALLERS_META_KEY, List.of("agent"));
+                McpToolRegistry.ALLOWED_CALLERS_META_KEY, List.of("agent"));
         assertText(result, "through-handler", false);
     }
 
@@ -263,33 +262,28 @@ class McpToolRegistryTest {
                 "agent", arguments -> "agent", Set.of(Tool.Caller.AGENT));
         ToolRegistration scriptOnly = registration(
                 "script", arguments -> "script", Set.of(Tool.Caller.SCRIPT));
-        Map<String, Object> scriptMeta = scriptMeta();
-
         McpToolRegistry registry = registry(List.of(), new FakeToolServer(), event -> {
         });
-        assertText(registry.call(agentOnly, Map.of(), scriptMeta, Map.of(), Tool.Caller.SCRIPT), "not allowed", true);
-        assertText(registry.call(scriptOnly, Map.of(), scriptMeta, Map.of(), Tool.Caller.SCRIPT), "script", false);
+        assertText(registry.call(agentOnly, Map.of(), Map.of(), Tool.Caller.SCRIPT), "not allowed", true);
+        assertText(registry.call(scriptOnly, Map.of(), Map.of(), Tool.Caller.SCRIPT), "script", false);
         assertText(registry.call(scriptOnly, Map.of()), "not allowed", true);
     }
 
     @Test
-    @DisplayName("调用者元数据不进入业务参数并写入审计来源")
-    void keepsCallerMetadataOutsideArgumentsAndAuditsSource() {
+    @DisplayName("endpoint 调用者不进入业务参数并写入审计")
+    void keepsCallerOutsideArgumentsAndAuditsCaller() {
         List<ToolAuditEvent> events = new ArrayList<>();
         ToolRegistration shared = registration(
                 "shared", arguments -> arguments, Set.of(Tool.Caller.AGENT, Tool.Caller.SCRIPT));
         McpToolRegistry registry = registry(List.of(shared), new FakeToolServer(), events::add);
         registry.afterSingletonsInstantiated();
-        Map<String, Object> meta = scriptMeta();
-
         McpSchema.CallToolResult result = registry.call(
-                find(registry, "shared"), Map.of("value", 1), meta, Map.of(), Tool.Caller.SCRIPT);
+                find(registry, "shared"), Map.of("value", 1), Map.of(), Tool.Caller.SCRIPT);
 
         assertText(result, "value", false);
         ToolAuditEvent invocation = events.getLast();
         assertThat(invocation.arguments()).containsOnlyKeys("value");
-        assertThat(invocation.source().caller()).isEqualTo(Tool.Caller.SCRIPT);
-        assertThat(invocation.source().skillId()).isEqualTo("skill-1");
+        assertThat(invocation.caller()).isEqualTo(Tool.Caller.SCRIPT);
     }
 
     private static McpToolRegistry registry(
@@ -303,14 +297,6 @@ class McpToolRegistryTest {
 
     private static ToolRegistration find(McpToolRegistry registry, String name) {
         return registry.tools().stream().filter(tool -> tool.name().equals(name)).findFirst().orElseThrow();
-    }
-
-    private static Map<String, Object> scriptMeta() {
-        return Map.of(
-                ToolCallSource.SKILL_ID_META_KEY, "skill-1",
-                ToolCallSource.SCRIPT_ID_META_KEY, "script-1",
-                ToolCallSource.PARENT_CALL_ID_META_KEY, "parent-1",
-                ToolCallSource.TRACE_ID_META_KEY, "trace-1");
     }
 
     private static ToolRegistration registration(String name, ToolInvoker invoker) {

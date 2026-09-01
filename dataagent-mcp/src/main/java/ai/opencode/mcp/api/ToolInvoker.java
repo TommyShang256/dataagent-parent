@@ -1,5 +1,7 @@
 package ai.opencode.mcp.api;
 
+import ai.opencode.mcp.annotation.Tool;
+
 import java.util.List;
 import java.util.Map;
 
@@ -34,18 +36,18 @@ public interface ToolInvoker {
     }
 
     /**
-     * 使用业务参数、传输 Header 与独立调用来源调用工具。
+     * 使用业务参数、传输 Header 与 endpoint 绑定调用者调用工具。
      *
      * @param arguments 工具参数映射
      * @param headers 当前请求的不可变多值 Header
-     * @param source 不进入业务参数的调用来源
+     * @param caller endpoint 绑定的调用者
      * @return 工具执行结果
      * @throws Exception 工具执行失败时抛出
      */
     default Object invoke(
             Map<String, Object> arguments,
             Map<String, List<String>> headers,
-            ToolCallSource source) throws Exception {
+            Tool.Caller caller) throws Exception {
         return invoke(arguments, headers);
     }
 }

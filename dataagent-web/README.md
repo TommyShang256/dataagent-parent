@@ -66,18 +66,12 @@ Opencode 保持上述 Agent 配置，不需要任何源码改动。Skill Script 
 调用者策略不代替 MCP Client 身份认证。生产部署应由网关、Spring Security、OAuth、mTLS 或网络策略保护 Script
 入口；starter 不要求 Script 专用 Token、Header 或环境变量。
 
-Skill Script 的标准 `tools/call` 可以携带审计来源 `_meta`，业务 `arguments` 不包含这些字段：
+Skill Script 使用无状态 CLI 发送标准 `tools/call`，只需提供工具名和业务参数：
 
 ```json
 {
   "name": "validate_table",
-  "arguments": { "catalog": "analytics" },
-  "_meta": {
-    "ai.opencode.dataagent/skill-id": "table-management",
-    "ai.opencode.dataagent/script-id": "validate",
-    "ai.opencode.dataagent/parent-call-id": "call-parent",
-    "ai.opencode.dataagent/trace-id": "trace-id"
-  }
+  "arguments": { "catalog": "analytics" }
 }
 ```
 

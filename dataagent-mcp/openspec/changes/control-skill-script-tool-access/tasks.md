@@ -13,13 +13,14 @@
 
 ## 3. 来源与审计
 
-- [x] 3.1 删除客户端 caller 解析，拒绝保留 caller `_meta`，并按绑定 caller 校验 Agent/Script 来源链
-- [x] 3.2 保证来源字段不进入业务 arguments、透传 Header或远程请求，审计记录绑定 caller 与 Script 链路
+- [x] 3.1 删除客户端 caller 解析和协议字段，只使用 endpoint 绑定 caller
+- [x] 3.2 保证 caller 不进入业务 arguments、透传 Header或远程请求，审计仅记录绑定 caller
+- [x] 3.3 删除 Skill ID、Script ID、父调用和 Trace 来源字段及 `ToolCallSource`，使 Script 调用适配无状态 CLI
 
 ## 4. 客户端与集成验证
 
 - [x] 4.1 使用两个官方 MCP Java Client 验证隔离目录和四种合法调用组合
-- [x] 4.2 验证错误 caller、来源链缺失和执行期越权均在本地/远程 invoker 前失败
+- [x] 4.2 验证无来源元数据的 Script 调用成功，且执行期越权在本地/远程 invoker 前失败
 - [x] 4.3 使用未修改的 Opencode MCP Client 验证 Agent endpoint 初始化、目录与调用成功
 - [x] 4.4 输出包含端点、目录矩阵、标准请求、拒绝位置及测试数量的中文验证记录
 
@@ -29,3 +30,12 @@
 - [x] 5.2 执行 DataAgent 父工程 `clean verify`、聚合 JavaDoc、覆盖率和 JAR 内容检查
 - [x] 5.3 执行严格 OpenSpec 校验、`git diff --check`、陈旧术语搜索和两个仓库状态检查
 - [x] 5.4 更新 README、配置元数据和协作约束，将 DataAgent 最新材料加入暂存区但不提交、不推送
+
+## 6. 无状态 Script Runner
+
+- [x] 6.1 新增独立 `dataagent-runner` 模块，使用 Linux Shell 与 Python 标准库连接固定 Script endpoint
+- [x] 6.2 实现 `--list` 全分页目录、工具名精确预检、JSON/stdin 参数、标准结果输出和稳定退出码
+- [x] 6.3 使用 `POD_IP` 与 `POD_PORT` 构造 Pod 内 BFF 地址，拒绝 localhost 回退和 CLI 地址/Header 注入
+- [x] 6.4 构建只包含单文件 `bin` Runner 和 README 的 ZIP/TAR 分发包，不引入 jq、curl、pip 或 JAR
+- [x] 6.5 覆盖 CLI、Pod 地址、分页、Session/协议 Header、SSE、错误路径及真实 BFF/API Fabric 端到端测试
+- [x] 6.6 编写 Runner 中文使用手册并更新父工程入口文档

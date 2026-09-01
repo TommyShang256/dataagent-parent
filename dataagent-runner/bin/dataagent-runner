@@ -1,0 +1,264 @@
+#!/bin/sh
+set -eu
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to run dataagent-runner" >&2
+  exit 127
+fi
+
+DATAAGENT_RUNNER_PYTHON=$(sed '1,/^__DATAAGENT_RUNNER_PYTHON__$/d' "$0")
+exec python3 -c "$DATAAGENT_RUNNER_PYTHON" "$@"
+exit 127
+
+__DATAAGENT_RUNNER_PYTHON__
+import http.client
+import ipaddress
+import json
+import os
+import sys
+
+VERSION = "0.1.0-SNAPSHOT"
+SCRIPT_ENDPOINT = "/rest/mcp/script"
+PROTOCOL_VERSION = "2025-06-18"
+USAGE = """Usage:
+  dataagent-runner --list
+  dataagent-runner <tool-name> [arguments-json]
+  dataagent-runner <tool-name> -
+
+Environment:
+  POD_IP    Pod IP hosting the DataAgent BFF
+  POD_PORT  DataAgent BFF HTTP port
+"""
+
+
+class RunnerError(Exception):
+    def __init__(self, exit_code, message):
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+class McpClient:
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.session_id = None
+        self.protocol_version = None
+        self.request_id = 0
+
+    def initialize(self):
+        result = self.request(
+            "initialize",
+            {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "dataagent-runner", "version": VERSION},
+            },
+            10,
+        )
+        negotiated = result.get("protocolVersion")
+        if not isinstance(negotiated, str) or not negotiated:
+            raise RunnerError(4, "MCP initialize response does not contain a protocol version")
+        self.protocol_version = negotiated
+        self.notify("notifications/initialized", {}, 10)
+
+    def list_tools(self):
+        tools = []
+        cursor = None
+        seen_cursors = set()
+        while True:
+            params = {} if cursor is None else {"cursor": cursor}
+            result = self.request("tools/list", params, 10)
+            page = result.get("tools")
+            if not isinstance(page, list):
+                raise RunnerError(4, "MCP tools/list response does not contain a tool array")
+            tools.extend(page)
+            cursor = result.get("nextCursor")
+            if cursor is None or cursor == "":
+                return tools
+            if not isinstance(cursor, str):
+                raise RunnerError(4, "MCP tools/list returned an invalid pagination cursor")
+            if cursor in seen_cursors:
+                raise RunnerError(4, "MCP tools/list returned a repeated pagination cursor")
+            seen_cursors.add(cursor)
+
+    def call_tool(self, name, arguments):
+        return self.request("tools/call", {"name": name, "arguments": arguments}, 300)
+
+    def request(self, method, params, timeout):
+        self.request_id += 1
+        request_id = self.request_id
+        response = self._post(
+            {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params},
+            timeout,
+            False,
+        )
+        if response.get("id") != request_id:
+            raise RunnerError(4, "MCP response id does not match the request id")
+        error = response.get("error")
+        if error is not None:
+            message = error.get("message") if isinstance(error, dict) else str(error)
+            raise RunnerError(4, "MCP request failed: " + (message or "unknown JSON-RPC error"))
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise RunnerError(4, "MCP response does not contain an object result")
+        return result
+
+    def notify(self, method, params, timeout):
+        self._post({"jsonrpc": "2.0", "method": method, "params": params}, timeout, True)
+
+    def _post(self, payload, timeout, allow_empty):
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        }
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+        if self.protocol_version:
+            headers["MCP-Protocol-Version"] = self.protocol_version
+        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        connection = http.client.HTTPConnection(self.host, self.port, timeout=timeout)
+        try:
+            connection.request("POST", SCRIPT_ENDPOINT, body=body, headers=headers)
+            response = connection.getresponse()
+            response_body = response.read()
+            response_session = response.getheader("Mcp-Session-Id")
+            if response_session:
+                self.session_id = response_session
+            if response.status < 200 or response.status >= 300:
+                detail = response_body.decode("utf-8", errors="replace")[:500]
+                raise RunnerError(4, f"MCP HTTP request failed with status {response.status}: {detail}")
+            if not response_body:
+                if allow_empty:
+                    return {}
+                raise RunnerError(4, "MCP HTTP response body is empty")
+            content_type = response.getheader("Content-Type", "").lower()
+            return decode_response(response_body, content_type)
+        except RunnerError:
+            raise
+        except (OSError, http.client.HTTPException) as error:
+            raise RunnerError(4, f"MCP HTTP request failed: {error}") from error
+        finally:
+            connection.close()
+
+
+def decode_response(body, content_type):
+    try:
+        text = body.decode("utf-8")
+        if "text/event-stream" in content_type:
+            return decode_sse(text)
+        value = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RunnerError(4, f"MCP response is not valid JSON: {error}") from error
+    if not isinstance(value, dict):
+        raise RunnerError(4, "MCP response must be a JSON object")
+    return value
+
+
+def decode_sse(text):
+    data_lines = []
+    events = []
+    for line in text.splitlines():
+        if line == "":
+            if data_lines:
+                events.append("\n".join(data_lines))
+                data_lines = []
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if data_lines:
+        events.append("\n".join(data_lines))
+    for event in events:
+        try:
+            value = json.loads(event)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    raise RunnerError(4, "MCP SSE response does not contain a JSON object event")
+
+
+def endpoint_from_environment():
+    host = os.environ.get("POD_IP", "").strip()
+    port_text = os.environ.get("POD_PORT", "").strip()
+    if not host:
+        raise RunnerError(3, "POD_IP must be configured")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    try:
+        ipaddress.ip_address(host)
+    except ValueError as error:
+        raise RunnerError(3, "POD_IP must be a valid IPv4 or IPv6 address") from error
+    try:
+        port = int(port_text)
+    except ValueError as error:
+        raise RunnerError(3, "POD_PORT must be an integer between 1 and 65535") from error
+    if port < 1 or port > 65535:
+        raise RunnerError(3, "POD_PORT must be an integer between 1 and 65535")
+    return host, port
+
+
+def parse_command(arguments):
+    if arguments == ["--help"]:
+        return "help", None, None
+    if arguments == ["--version"]:
+        return "version", None, None
+    if arguments == ["--list"]:
+        return "list", None, None
+    if not arguments:
+        raise RunnerError(2, "A command or tool name is required")
+    if len(arguments) > 2:
+        raise RunnerError(2, "Tool calls accept only a tool name and one JSON argument object")
+    tool_name = arguments[0]
+    if not tool_name.strip() or tool_name.startswith("--"):
+        raise RunnerError(2, "Tool name must be a non-empty positional argument")
+    json_text = "{}" if len(arguments) == 1 else arguments[1]
+    if json_text == "-":
+        json_text = sys.stdin.read()
+    try:
+        tool_arguments = json.loads(json_text)
+    except json.JSONDecodeError as error:
+        raise RunnerError(2, f"Tool arguments must be valid JSON: {error}") from error
+    if not isinstance(tool_arguments, dict):
+        raise RunnerError(2, "Tool arguments must be a JSON object")
+    return "call", tool_name, tool_arguments
+
+
+def write_json(value):
+    try:
+        print(json.dumps(value, ensure_ascii=False, indent=2, separators=(",", ": ")))
+    except (TypeError, ValueError) as error:
+        raise RunnerError(7, f"Failed to serialize MCP response: {error}") from error
+
+
+def run(arguments):
+    command, tool_name, tool_arguments = parse_command(arguments)
+    if command == "help":
+        print(USAGE, end="")
+        return 0
+    if command == "version":
+        print(VERSION)
+        return 0
+    host, port = endpoint_from_environment()
+    client = McpClient(host, port)
+    client.initialize()
+    tools = client.list_tools()
+    tools.sort(key=lambda tool: str(tool.get("name", "")))
+    if command == "list":
+        write_json(tools)
+        return 0
+    if not any(tool.get("name") == tool_name for tool in tools):
+        raise RunnerError(5, f'Tool "{tool_name}" is not available from the Script MCP server')
+    result = client.call_tool(tool_name, tool_arguments)
+    write_json(result)
+    return 6 if result.get("isError") is True else 0
+
+
+try:
+    sys.exit(run(sys.argv[1:]))
+except RunnerError as error:
+    print(str(error), file=sys.stderr)
+    if error.exit_code == 2:
+        print(USAGE, file=sys.stderr, end="")
+    sys.exit(error.exit_code)
+except BrokenPipeError:
+    sys.exit(7)

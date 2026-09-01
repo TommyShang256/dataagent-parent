@@ -63,6 +63,8 @@ class DataAgentMcpIntegrationTest {
 
     private McpSyncClient scriptClient;
 
+    private int bffPort;
+
     @BeforeEach
     void startServers() throws IOException {
         apiFabric = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -87,9 +89,9 @@ class DataAgentMcpIntegrationTest {
                         "spring.lifecycle.timeout-per-shutdown-phase=1s")
                 .run("--dataagent.mcp.api-fabric.base-url=http://127.0.0.1:"
                         + apiFabric.getAddress().getPort() + "/api");
-        int port = ((WebServerApplicationContext) application).getWebServer().getPort();
-        agentClient = client(port, "/rest/mcp");
-        scriptClient = client(port, "/rest/mcp/script");
+        bffPort = ((WebServerApplicationContext) application).getWebServer().getPort();
+        agentClient = client(bffPort, "/rest/mcp");
+        scriptClient = client(bffPort, "/rest/mcp/script");
     }
 
     @AfterEach
@@ -223,6 +225,32 @@ class DataAgentMcpIntegrationTest {
     }
 
     @Test
+    @DisplayName("Shell Runner 通过标准 MCP 流程调用 BFF 的 Script-only 工具")
+    void shellRunnerCallsScriptToolEndToEnd() throws Exception {
+        Path runner = Path.of("..", "dataagent-runner", "bin", "dataagent-runner")
+                .toAbsolutePath()
+                .normalize();
+        assertThat(runner).isRegularFile();
+
+        ProcessBuilder processBuilder = new ProcessBuilder(
+                "/bin/sh",
+                runner.toString(),
+                "validate_table",
+                "{\"catalog\":\"runner\"}");
+        processBuilder.environment().put("POD_IP", "127.0.0.1");
+        processBuilder.environment().put("POD_PORT", Integer.toString(bffPort));
+        Process process = processBuilder.start();
+        String standardOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        String standardError = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        int exitCode = process.waitFor();
+
+        assertThat(exitCode).as(standardError).isZero();
+        assertThat(OBJECT_MAPPER.readTree(standardOutput).path("isError").asBoolean()).isFalse();
+        assertThat(standardOutput).contains("validated");
+        assertThat(validateCalls).hasValue(1);
+    }
+
+    @Test
     @DisplayName("Agent 与 Script 越权均在 API Fabric 前拒绝")
     void callerPolicyRejectsBeforeApiFabric() {
         assertThatThrownBy(() -> agentClient.callTool(
@@ -236,36 +264,8 @@ class DataAgentMcpIntegrationTest {
         assertThat(orderRequest).hasValue(null);
     }
 
-    @Test
-    @DisplayName("客户端 caller 和不完整 Script 来源均在 API Fabric 前拒绝")
-    void rejectsCallerOverrideAndIncompleteScriptSourceBeforeApiFabric() {
-        McpSchema.CallToolResult callerOverride = agentClient.callTool(
-                McpSchema.CallToolRequest.builder("upload_table")
-                        .arguments(Map.of("filePath", "/tmp/not-used.dsl", "catalog", "not-used"))
-                        .meta(Map.of("ai.opencode.dataagent/caller", "script"))
-                        .build());
-        McpSchema.CallToolResult incompleteScriptSource = scriptClient.callTool(
-                new McpSchema.CallToolRequest("validate_table", Map.of("catalog", "script")));
-
-        assertThat(callerOverride.isError()).isTrue();
-        assertThat(((McpSchema.TextContent) callerOverride.content().getFirst()).text())
-                .contains("endpoint", "must not");
-        assertThat(incompleteScriptSource.isError()).isTrue();
-        assertThat(((McpSchema.TextContent) incompleteScriptSource.content().getFirst()).text())
-                .contains("requires", "trace");
-        assertThat(uploadCalls).hasValue(0);
-        assertThat(validateCalls).hasValue(0);
-    }
-
     private static McpSchema.CallToolRequest scriptRequest(String name, Map<String, Object> arguments) {
-        return McpSchema.CallToolRequest.builder(name)
-                .arguments(arguments)
-                .meta(Map.of(
-                        "ai.opencode.dataagent/skill-id", "integration",
-                        "ai.opencode.dataagent/script-id", "run",
-                        "ai.opencode.dataagent/parent-call-id", "call-parent",
-                        "ai.opencode.dataagent/trace-id", "trace-integration"))
-                .build();
+        return new McpSchema.CallToolRequest(name, arguments);
     }
 
     private static McpSyncClient client(int port, String endpoint) {

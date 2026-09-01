@@ -1,7 +1,6 @@
 package ai.opencode.mcp.audit;
 
 import ai.opencode.mcp.annotation.Tool;
-import ai.opencode.mcp.api.ToolCallSource;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -82,12 +81,12 @@ public record ToolAuditEvent(
   }
 
   /**
-   * 获取工具调用来源。
+   * 获取 endpoint 绑定的调用者。
    *
-   * @return 注册事件返回 {@code null}，调用事件返回有效来源
+   * @return 注册事件返回 {@code null}，调用事件返回 endpoint 绑定调用者
    */
-  public ToolCallSource source() {
-    return details.source;
+  public Tool.Caller caller() {
+    return details.caller;
   }
 
   /**
@@ -119,7 +118,7 @@ public record ToolAuditEvent(
     private final Map<String, Object> arguments;
     private final Object result;
     private final String errorType;
-    private final ToolCallSource source;
+    private final Tool.Caller caller;
 
     /**
      * 创建审计详情，并对调用参数执行防御性复制。
@@ -128,21 +127,21 @@ public record ToolAuditEvent(
      * @param arguments 调用参数
      * @param result 调用结果
      * @param errorType 异常类型名称
-     * @param source 工具调用来源
+     * @param caller endpoint 绑定的调用者
      */
     public Details(
         Duration duration,
         Map<String, Object> arguments,
         Object result,
         String errorType,
-        ToolCallSource source) {
+        Tool.Caller caller) {
       this.duration = duration;
       this.arguments = arguments == null
           ? null
           : Collections.unmodifiableMap(new LinkedHashMap<>(arguments));
       this.result = result;
       this.errorType = errorType;
-      this.source = source;
+      this.caller = caller;
     }
 
     /**

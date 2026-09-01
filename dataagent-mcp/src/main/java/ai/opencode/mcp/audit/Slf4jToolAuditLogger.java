@@ -25,19 +25,14 @@ public final class Slf4jToolAuditLogger implements ToolAuditLogger {
     @Override
     public void record(ToolAuditEvent event) {
         String message = "MCP tool audit operation={} outcome={} tool={} type={} durationMs={} "
-                + "caller={} skillId={} scriptId={} parentCallId={} traceId={} "
-                + "arguments={} result={} errorType={}";
+                + "caller={} arguments={} result={} errorType={}";
         Object[] arguments = new Object[]{
                 event.operation(),
                 event.outcome(),
                 event.toolName(),
                 event.type(),
                 event.duration().toMillis(),
-                event.source() == null ? null : event.source().caller(),
-                event.source() == null ? null : event.source().skillId(),
-                event.source() == null ? null : event.source().scriptId(),
-                event.source() == null ? null : event.source().parentCallId(),
-                event.source() == null ? null : event.source().traceId(),
+                event.caller(),
                 event.arguments(),
                 event.result(),
                 event.errorType()
