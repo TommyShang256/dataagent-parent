@@ -33,7 +33,7 @@
 
 ## 6. 无状态 Script Runner
 
-- [x] 6.1 新增独立单文件 `dataagent-runner/bin/dataagent-runner`，使用 Python shebang 与标准库连接固定 Script endpoint，并验证 `--help` 和 `--version`
+- [x] 6.1 新增独立单文件 `../../../src/main/resources/dataagent-runner`，使用 Python shebang 与标准库连接固定 Script endpoint，并验证 `--help` 和 `--version`
 - [x] 6.2 实现 `--list` 全分页目录、工具名精确预检、JSON/stdin 参数、标准结果输出和稳定退出码
 - [x] 6.3 使用 `POD_IP` 与 `POD_PORT` 构造 Pod 内 BFF 地址，拒绝 localhost 回退和 CLI 地址/Header 注入
 - [x] 6.4 删除 Runner Maven 模块、归档配置、独立 README 与测试目录，确认 `dataagent-runner` 下只保留可执行文件

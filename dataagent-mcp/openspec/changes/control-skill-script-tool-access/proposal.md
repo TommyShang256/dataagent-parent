@@ -9,7 +9,7 @@ DataAgent MCP Tool 需要同时供现有 Opencode Agent 与可复用 Skill/Scrip
 - 每个入口绑定固定的服务端调用者：Agent 入口固定为 `AGENT`，Script 入口固定为 `SCRIPT`，客户端元数据不参与 caller 判定。
 - 每个 Tool 继续通过 `allowedCallers` 声明仅 Agent、仅 Script 或二者均可；启动时只向允许的入口发布，形成服务端隔离目录，并在执行前再次校验。
 - Script 调用不要求 Skill ID、Script ID、父调用或 Trace 元数据；无状态 CLI 只需向 Script 入口发送标准 `tools/call`。
-- 在 `dataagent-runner/bin/dataagent-runner` 提供可直接执行的无状态 Python Script MCP CLI；支持完整工具目录查询、调用前存在性预检、JSON/stdin 参数和标准 MCP 结果输出。
+- 在 `../../../src/main/resources/dataagent-runner` 提供可直接执行的无状态 Python Script MCP CLI；支持完整工具目录查询、调用前存在性预检、JSON/stdin 参数和标准 MCP 结果输出。
 - Runner 只读取部署注入的 `POD_IP` 与 `POD_PORT`，固定连接 `http://${POD_IP}:${POD_PORT}/rest/mcp/script`，不允许调用方传入 MCP 地址或任意 HTTP Header。
 - 两个入口继续使用标准 Streamable HTTP MCP 协议，不增加 Script Token、私有调用协议或 Opencode 专用适配。
 - 部署环境必须在网关、Spring Security、OAuth 或 mTLS 层保护 Script 入口；入口路由负责授权来源绑定，不替代客户端身份认证。

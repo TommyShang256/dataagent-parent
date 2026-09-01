@@ -56,7 +56,7 @@ Script 请求没有专用 Token、环境变量、私有 Header 或非标准 HTTP
 
 ### 3.3 单文件 Script Runner
 
-`dataagent-runner/bin/dataagent-runner` 使用 `#!/usr/bin/env python3` 直接调用 PATH 中的 Python 3，
+`../../../src/main/resources/dataagent-runner` 使用 `#!/usr/bin/env python3` 直接调用 PATH 中的 Python 3，
 仅依赖标准库，不经过 Shell、sed 或 `python3 -c`，也不依赖 jq、curl、pip、JAR 或第三方 Python 包。
 `dataagent-web` 集成测试验证了以下链路：
 
