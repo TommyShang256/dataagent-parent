@@ -37,8 +37,8 @@
 - 工具只通过 `@Tool` 声明，`@Tool.name` 同时作为远程端点 `ref`。
 - `Tool.Type` 表示绑定后的最终执行类别，由 scanner 和端点处理器自动确定，不作为 `@Tool` 参数手工配置。
 - API Fabric 与 CSE 使用公共 `RemoteToolEndpointHandler` SPI，并保留可独立替换的端点处理实现。
-- API Fabric 共享 `base-url` 并使用独立 WebClient；CSE 保留完整 `cse://service-name/...` URI，使用应用提供的 `CseRestTemplateProvider` 和 `RestOperations`。共享绑定器按 `Tool.Type` 选择上述执行通道，CSE 不使用 WebClient。
-- starter 不内置公司环境相关的 CSE RestTemplate 实现；配置 CSE ref 但未提供有效 provider 时必须在发布工具目录前失败。
+- API Fabric 共享 `base-url`，其处理器直接持有独立 WebClient；CSE 保留完整 `cse://service-name/...` URI，其处理器直接持有应用提供且命名为 `cseRestOperations` 的 `RestOperations`。共享绑定器只负责参数映射，不持有客户端或按 `Tool.Type` 选择执行通道。
+- starter 不内置公司环境相关的 CSE RestTemplate 实现；配置 CSE ref 但未提供 `cseRestOperations` Bean 时必须在发布工具目录前失败。
 - Path 参数由 URI template 占位符自动识别；Query 和业务 Header 显式配置；排除这些参数后，其余参数按原名自动组成展开的 JSON Body。
 - Header 配置只声明 `business`；其他允许的入站 Header 默认透传。透传 Header 不进入工具 Schema、arguments 或审计值。
 - 请求 Header 直接使用不可变的多值 `Map<String, List<String>>` 传递，不额外声明只做包装的调用上下文类型。

@@ -16,7 +16,7 @@
 
 - [x] 3.1 将注解工具名称和端点属性编译为不可变的 API Fabric/CSE 调用计划，同时保持未匹配工具为本地调用；通过 scanner 测试确认远程方法体不会执行，且最终类型元数据正确
 - [x] 3.2 在 MCP Server 注册前验证完整绑定集合，包括跨类别重复 ref、未知 ref、URI 占位符没有同名工具参数、Query/业务 Header 引用未知参数或发生位置冲突、重复下游名称及非法 method/URI；通过测试确认每个错误都包含类别、ref 和问题参数，且不会发布部分目录
-- [x] 3.3 从 `path-template` 或 CSE `uri-template` 占位符自动识别同名 Path 参数，使用 `base-url` 和模板构建 API Fabric URI，并保留展开后的完整 CSE URI；通过测试验证无需 Path 配置、path 编码、method 选择、基础路径处理、占位参数缺失，以及 `cse://service-name/...` 原样传给 client provider
+- [x] 3.3 从 `path-template` 或 CSE `uri-template` 占位符自动识别同名 Path 参数，使用 `base-url` 和模板构建 API Fabric URI，并保留展开后的完整 CSE URI；通过测试验证无需 Path 配置、path 编码、method 选择、基础路径处理、占位参数缺失，以及 `cse://service-name/...` 原样传给 CSE client
 - [x] 3.4 从工具参数映射 Query 参数和 Agent 提供的业务 Header，包括目标重命名、可选值省略、Jackson 标量转换和集合重复值；通过捕获的下游请求确认每个参数只出现在算法确定的位置
 - [x] 3.5 将调用 context 中除业务 Header 同名项和系统排除项外的其他 Header 默认原样复制到下游请求，且不审计其值；通过测试验证无需透传配置、业务参数值优先、多值保留、系统项过滤，以及透传值不会进入 Schema、arguments 和审计记录
 - [x] 3.6 排除自动识别的 Path 参数及显式配置的 Query、业务 Header 参数后，将剩余工具参数按原名自动组装为 JSON Object Body；通过测试确认无需 Body 配置、缺失可选字段被省略、显式 null 和结构化值被保留、根 Schema 保持展开，且没有剩余参数时不发送请求体
@@ -69,7 +69,7 @@
 ## 11. Remote 包结构收敛
 
 - [x] 11.1 将 `RemoteHeaderPolicy` 与 `ServletToolContextExtractor` 合并为单一请求 Header 边界，收窄策略方法可见性，并通过提取、系统排除、CR/LF 和远程透传测试确认行为不变
-- [x] 11.2 将共享调用组件重命名为 `RemoteToolBindingFactory`，使用 Lombok 消除内部构造样板、绑定期预计算业务 Header 名称、删除不可达响应分支，并增加 API Fabric `path-template` 路径校验测试
+- [x] 11.2 将共享调用组件重命名为 `RemoteToolInvokerBinder`，使用 Lombok 消除内部构造样板、绑定期预计算业务 Header 名称、删除不可达响应分支，并增加 API Fabric `path-template` 路径校验测试
 - [x] 11.3 更新验证材料，执行 starter、消费端、JavaDoc、严格 OpenSpec、结构计数、JAR 与 Git 暂存检查
 
 ## 12. 英文日志约束
@@ -84,6 +84,24 @@
 
 ## 14. CSE RestTemplate 扩展
 
-- [x] 14.1 删除 CSE 对 WebClient 和 `RemoteToolWebClientProvider` 的依赖，为 API Fabric 提供独立 WebClient，并增加应用可替换的 `CseRestTemplateProvider` 与明确的默认占位实现
-- [x] 14.2 在共享绑定器中按 `Tool.Type` 选择 WebClient 或 RestOperations，使用 provider 返回的 `RestOperations.exchange(url, method, requestEntity, responseType)` 执行 CSE URI、method、Header、Body 和泛型响应映射，并覆盖 CSE provider 缺失、请求捕获和错误映射测试
+- [x] 14.1 删除 CSE 对 WebClient 和 `RemoteToolWebClientProvider` 的依赖，为 API Fabric 提供独立 WebClient，并允许应用提供 CSE RestOperations
+- [x] 14.2 使用 `RestOperations.exchange(url, method, requestEntity, responseType)` 执行 CSE URI、method、Header、Body 和泛型响应映射，并覆盖 CSE 客户端缺失、请求捕获和错误映射测试
 - [x] 14.3 更新 README 与验证材料，执行 starter、消费端、JavaDoc、严格 OpenSpec、生产字符串扫描、JAR 和 Git 暂存检查
+
+## 15. 远程调用实现按工具类型隔离
+
+- [x] 15.1 将 API Fabric WebClient 调用与响应转换显式移入 `ApiFabricToolEndpointHandler`，使其不再依赖 CSE provider
+- [x] 15.2 将 CSE RestOperations 取得、`HttpEntity<Object>` 构造和 `exchange` 调用显式移入 `CseToolEndpointHandler`，使其不再依赖 API Fabric WebClient；共享绑定工厂只保留参数映射
+- [x] 15.3 增加依赖隔离与两类调用路径测试，同步 README 和验证材料，执行 starter、消费端、JavaDoc、严格 OpenSpec、JAR 和 Git 暂存检查
+
+## 16. CSE 客户端直接注入
+
+- [x] 16.1 删除只包装客户端的 `CseRestTemplateProvider`，使 `CseToolEndpointHandler` 与 API Fabric handler 一样在构造时直接接收并持有自己的客户端
+- [x] 16.2 自动配置按名称解析可选的 `cseRestOperations` Bean；配置 CSE ref 但客户端缺失时继续在发布目录前失败，未配置 CSE ref 时不影响启动
+- [x] 16.3 同步 starter、消费端、README、协作记忆和验证材料，执行双模块测试、JavaDoc、严格 OpenSpec、结构及 JAR 检查并暂存最新改动
+
+## 17. 函数参数数量收敛
+
+- [x] 17.1 增加编译后签名约束测试，覆盖 starter 与消费端生产、测试类的非 synthetic 方法和构造器，确保参数数量最多为 5
+- [x] 17.2 使用有明确职责的嵌套不可变值重构注册、审计和远程绑定签名，拆分测试高参数方法并收敛消费端代理工具参数，同时保持远程请求、响应、Schema 和审计行为
+- [x] 17.3 更新验证材料，执行 starter 与消费端 clean verify、JavaDoc、严格 OpenSpec、生产字符串、结构、JAR、diff 和 Git 暂存检查

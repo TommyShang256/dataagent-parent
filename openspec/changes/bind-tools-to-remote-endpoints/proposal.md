@@ -18,8 +18,9 @@
 - 将最终绑定类型收敛为 `Tool.Type`，删除同时保存重复来源标识的 `ToolOrigin`；将只包装请求 Header 的 `ToolInvocationContext` 内联为不可变多值 Header 映射。
 - 将只复制 `@Tool` 四个行为属性的 `ToolHints` 内联到 `ToolRegistration`，减少重复模型和对象转换。
 - 合并 Servlet Header 提取与远程 Header 策略，收敛共享绑定工厂的命名和内部实现，同时保持 API Fabric/CSE handler 的独立扩展边界。
-- 共享绑定器按最终 `Tool.Type` 选择执行通道：API Fabric 使用 WebClient，CSE 使用可替换的 `CseRestTemplateProvider` 提供的 `RestOperations`；starter 只预留 CSE 接口和启动期缺失校验，不内置公司环境相关实现。
+- API Fabric 与 CSE 的调用逻辑分别明确收敛到 `ApiFabricToolEndpointHandler` 和 `CseToolEndpointHandler`；前者直接注入 WebClient，后者直接注入命名为 `cseRestOperations` 的 `RestOperations`。共享绑定器只负责参数映射，不再按 `Tool.Type` 隐式选择客户端，也不保留额外的 CSE provider 包装层。
 - 统一使用英文生产运行时字符串，覆盖日志模板、异常消息和断言消息，禁止中文字符串经框架异常记录进入日志。
+- 将 starter 与消费端全部显式或生成的方法、构造器参数数量限制为最多 5 个，使用具有业务内聚性的值对象收敛高维注册、审计和远程调用契约。
 - 将 multipart 文件上传记录为后续待办；本次变更只支持 JSON 请求体。
 
 ## Capabilities
@@ -36,5 +37,5 @@
 
 - 影响工具扫描、标准化调用、MCP transport context 提取、registry 调用处理、自动配置、配置属性与元数据、文档，以及同级的 `dataagent-mcp-test` 消费端应用。
 - 增加 API Fabric 所需的 Spring WebFlux 客户端 API，同时保留现有基于 Servlet 的 MCP Server。
-- 引入可配置的 API Fabric/CSE 端点模型、可扩展的端点处理 SPI、独立 API Fabric WebClient 和 CSE RestTemplate provider 边界。
+- 引入可配置的 API Fabric/CSE 端点模型、可扩展的端点处理 SPI，以及分别直接注入两个默认 handler 的 API Fabric WebClient 和 CSE RestOperations 客户端。
 - 不增加 Resources、Prompts、运行时目录修改、multipart 上传或固定 Header 配置。

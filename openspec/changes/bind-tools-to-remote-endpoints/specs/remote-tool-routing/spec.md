@@ -34,15 +34,17 @@ starter SHALL 为每个 CSE 引用接受 HTTP method 和完整的 `cse://service
 - **THEN** 下游客户端收到完整 URI，且 `cse` scheme 保持不变
 
 #### Scenario: 应用提供 CSE RestTemplate
-- **WHEN** 应用配置了 CSE 端点引用并提供 `CseRestTemplateProvider`
-- **THEN** starter 使用 provider 返回的 `RestOperations` 执行 CSE 请求
+- **WHEN** 应用配置了 CSE 端点引用并提供命名为 `cseRestOperations` 的 `RestOperations` Bean
+- **THEN** starter 将该客户端直接注入 `CseToolEndpointHandler` 并执行 CSE 请求
 
 #### Scenario: CSE RestTemplate 尚未实现
-- **WHEN** 应用配置了 CSE 端点引用但没有替换 starter 的占位 provider
-- **THEN** 应用在发布工具目录之前启动失败，诊断信息明确要求提供 CSE RestTemplate 实现
+- **WHEN** 应用配置了 CSE 端点引用但没有提供命名为 `cseRestOperations` 的 `RestOperations` Bean
+- **THEN** 应用在发布工具目录之前启动失败，诊断信息明确要求提供该 CSE RestTemplate Bean
 
 ### Requirement: 远程端点类别通过统一接口独立替换
 starter SHALL 通过公共远程端点处理接口接入不同端点类别，并分别提供 API Fabric 和 CSE 默认实现。应用替换其中一个类别的实现时，MUST NOT 禁用或替换另一个类别的默认实现；scanner 必须汇总全部实现并统一完成工具绑定与跨实现引用校验。
+
+API Fabric 与 CSE 默认实现必须按最终 `Tool.Type` 隔离调用逻辑：API Fabric 实现直接持有 WebClient 且不得依赖 CSE 客户端，CSE 实现直接持有 RestOperations 且不得依赖 API Fabric WebClient；两者之间不得使用额外 provider 包装客户端，共享参数映射组件不得包含按类型选择客户端的运行时分支。
 
 #### Scenario: 只替换 API Fabric 实现
 - **WHEN** 应用提供自定义 API Fabric 端点处理实现
@@ -55,6 +57,14 @@ starter SHALL 通过公共远程端点处理接口接入不同端点类别，并
 #### Scenario: 不同实现声明重复引用
 - **WHEN** 任意两个远程端点处理实现声明同一个引用
 - **THEN** 应用在发布工具目录前启动失败，诊断信息指出重复引用及对应实现
+
+#### Scenario: API Fabric 调用实现与 CSE 隔离
+- **WHEN** 工具绑定类型为 `API_FABRIC`
+- **THEN** `ApiFabricToolEndpointHandler` 使用自身的 WebClient 执行请求，不读取或依赖 CSE RestTemplate
+
+#### Scenario: CSE 调用实现与 API Fabric 隔离
+- **WHEN** 工具绑定类型为 `CSE`
+- **THEN** `CseToolEndpointHandler` 使用构造时直接注入的 RestOperations 执行请求，不在绑定时再通过 provider 获取客户端，也不读取或依赖 API Fabric WebClient
 
 ### Requirement: 按简化规则确定工具参数位置
 starter SHALL 从 `path-template` 或 CSE URI template 的占位符自动识别同名 Path 工具参数。Query 和业务 Header 参数必须通过配置显式映射；排除 Path、Query 和业务 Header 参数后，剩余工具参数必须按原参数名自动成为 JSON Body 字段。透传 Header 不属于工具参数，不参与参数位置计算。
@@ -172,3 +182,14 @@ starter SHALL 对工具审计、注册回滚、审计记录失败、启动校验
 #### Scenario: 输出工具运行日志
 - **WHEN** starter 记录工具审计事件，或框架记录启动校验、注册回滚、审计失败及远程调用异常
 - **THEN** starter 自身提供的固定文本、字段名和异常消息只使用英文，不包含中文字符
+
+### Requirement: 函数参数数量保持有限
+starter 与消费端全部 Java 源码中显式声明或由 record、Lombok 生成的方法和构造器 SHALL 最多接收 5 个参数。超过该上限的相关值必须按稳定业务职责组合，不得使用无语义的通用参数袋，也不得以删除必要校验或混合远程端点职责规避限制。
+
+#### Scenario: 编译后的函数签名满足上限
+- **WHEN** starter 与消费端完成生产和测试源码编译
+- **THEN** 每个非 synthetic 方法和构造器的反射参数数量都不超过 5
+
+#### Scenario: 高维远程绑定数据按职责组合
+- **WHEN** 远程工具绑定需要同时保存端点、参数映射、请求和返回类型信息
+- **THEN** 系统使用端点目标、参数映射和远程请求等有明确职责的不可变值对象组合这些信息，并保持 API Fabric 与 CSE 的调用隔离

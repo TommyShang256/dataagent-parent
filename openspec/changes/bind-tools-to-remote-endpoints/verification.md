@@ -11,10 +11,11 @@
 | API Fabric 模板不是绝对路径 | `RemoteToolEndpointHandlerTest.validatesWholeCatalogBeforeReturningAnyRegistration`，覆盖绝对 URL、相对路径和 scheme-relative 路径 |
 | 输出工具运行日志 | `LoggingLanguageTest` 扫描 starter 与消费端全部生产字符串字面量并捕获实际审计日志，确认日志模板、异常及断言消息不包含中文字符 |
 | CSE URI 保持不变 | starter 与消费端 CSE 捕获请求断言 |
-| 应用提供 CSE RestTemplate | `RemoteToolEndpointHandlerTest.preservesCseSchemeAndConvertsGenericResponseWithoutExecutingProxyBody`；消费端完整请求映射测试 |
-| CSE RestTemplate 尚未实现 | `RemoteToolEndpointHandlerTest.failsBeforePublishingCseToolWhenRestTemplateIsNotConfigured` |
+| 应用提供 CSE RestTemplate | `McpFabricAutoConfigurationTest.applicationCanProvideCseRestOperations`；`RemoteToolEndpointHandlerTest.preservesCseSchemeAndConvertsGenericResponseWithoutExecutingProxyBody`；消费端完整请求映射测试 |
+| CSE RestTemplate 尚未实现 | `McpFabricAutoConfigurationTest.failsBeforePublishingCseToolWhenNamedRestOperationsIsMissing`；`RemoteToolEndpointHandlerTest.failsBeforePublishingCseToolWhenRestTemplateIsNotConfigured` |
 | 只替换 API Fabric 实现 | `McpFabricAutoConfigurationTest.applicationCanReplaceOnlyApiFabricEndpointHandler` |
 | 只替换 CSE 实现 | `McpFabricAutoConfigurationTest.applicationCanReplaceOnlyCseEndpointHandler` |
+| API Fabric 与 CSE 调用依赖隔离 | `RemoteToolEndpointHandlerTest.isolatesApiFabricAndCseClientDependencies`；两个完整请求捕获测试分别验证 WebClient 与 RestOperations 调用 |
 | 不同实现声明重复引用 | `McpToolScannerEndpointHandlerTest.rejectsDuplicateReferenceAcrossHandlers` |
 | 组装混合请求位置 | `bindsFabricRequestWithAutomaticPathBodyQueryAndHeaderRules` |
 | Path 参数由模板自动识别 | starter Path 编码、缺失参数和无 Path 配置断言 |
@@ -58,30 +59,57 @@
 使用四个注解工具验证固定目录、本地调用及审计行为。API Fabric/CSE 远程绑定继续由
 `RemoteToolEndpointHandlerTest` 和消费端集成测试覆盖。
 
-来源与上下文内联检查：`ToolRegistration`、审计事件和共享绑定器统一使用最终解析的
-`Tool.Type`；绑定器按该类型选择 API Fabric WebClient 或 CSE RestOperations，`RemoteToolEndpointHandlerTest`
-覆盖 `LOCAL`、`API_FABRIC`、`CSE` 三种内置类型。独立的
+来源与上下文内联检查：`ToolRegistration` 和审计事件统一使用最终解析的 `Tool.Type`；scanner 按 ref 选择唯一
+handler，由 handler 设置最终类型。共享绑定器不按类型选择客户端，`RemoteToolEndpointHandlerTest` 覆盖
+`LOCAL`、`API_FABRIC`、`CSE` 三种内置类型。独立的
 `ToolOrigin`、重复 `sourceId` 和 `ToolInvocationContext` 均已删除。`ToolInvoker` 仍保持单抽象方法，默认重载
 直接接收不可变多值 Header 映射；starter registry 测试和消费端完整请求测试验证 Header 透传、审计隔离及
 请求间隔离行为不变。
 
 Remote 包收敛检查：`RemoteRequestHeaders` 同时承担 SDK transport SPI、系统 Header 排除和 CR/LF 校验，替代
-原先两个共同维护同一边界的类型；`RemoteToolBindingFactory` 负责 API Fabric/CSE 共享的请求绑定和执行，并在
-绑定期预计算业务 Header 名称。API Fabric 与 CSE 默认处理器及公共 SPI 继续独立，确保两类端点能够分别替换。
+原先两个共同维护同一边界的类型；`RemoteToolInvokerBinder` 只负责 API Fabric/CSE 共享的请求参数映射，并在
+绑定期预计算业务 Header 名称。API Fabric 与 CSE 默认处理器分别拥有 WebClient 和 RestOperations 调用逻辑及
+响应处理，且不持有对方客户端依赖，确保两类端点能够分别替换。
 本轮在相同 `javap -p` 口径下使生产源码从 19 个减少到 18 个、编译类从 33 个减少到 32 个，构造器和方法保持
 220 个；CSE RestTemplate 调整删除旧 WebClient provider 并增加同数量的有效 CSE provider，因此生产源码仍为 18 个、
 编译类仍为 32 个；按相同口径统计的构造器和方法为 223 个，增量来自 WebClient/RestOperations 两个执行分支及 CSE 客户端启动校验。
 remote 包为 6 个生产源码、774 行。新增路径校验方法与删除的重复 Header 类型成员相互抵消，未以
 隐藏逻辑换取成员数量下降。
 
+本轮调用隔离后，生产源码仍为 18 个，remote 包仍为 6 个生产源码；`RemoteToolInvokerBinder` 不再引用
+`Tool.Type`、WebClient、RestOperations 或 CSE provider。为在不扩大公共 SPI 的前提下把已映射请求交给当前
+handler，工厂只增加一个包内嵌套函数接口，因此编译类为 33 个；按相同 `javap -p` 口径统计构造器和方法为
+223 个，remote 包为 797 行。两个 handler 各自增加的调用代码来自原共享绑定器，没有新增顶层生产类型。
+
+CSE 客户端直接注入后，`CseRestTemplateProvider` 及其默认占位 Bean 已删除；两个 handler 现在分别直接持有
+WebClient 和 RestOperations。生产源码由 18 个减少为 17 个，编译类由 33 个减少为 32 个，按相同
+`javap -p` 口径统计构造器和方法由 223 个减少为 220 个；remote 包由 6 个生产源码减少为 5 个，共 780 行。
+自动配置只使用按名称限定的 `ObjectProvider<RestOperations>` 处理可选装配，不形成公共类型或远程调用中间层。
+
 工具行为属性内联检查：`ToolHints` 已删除，scanner 将 `@Tool.readOnly`、`destructive`、`idempotent` 和
 `openWorld` 直接写入 `ToolRegistration`。`McpToolRegistryTest.generatedSpecificationInvokesMcpHandler` 验证四个
 值原样生成 SDK `ToolAnnotations`；`RemoteToolEndpointHandlerTest.bindsFabricRequestWithAutomaticPathBodyQueryAndHeaderRules`
 验证远程 invoker 与类型替换后四个值仍完整保留。
 
-最终门禁：starter `clean verify` 共 50 个测试、消费端 `clean verify` 共 4 个测试全部通过；两侧 JavaDoc 均
+最终门禁：starter `clean verify` 共 52 个测试、消费端 `clean verify` 共 4 个测试全部通过；两侧 JavaDoc 均
 生成成功；严格 OpenSpec 校验和 `git diff --check` 通过。starter JAR 只包含收敛后的 7 个 remote 编译类，未
-包含 `RemoteHeaderPolicy`、`ServletToolContextExtractor`、`RemoteToolInvocationFactory` 或 `RemoteToolWebClientProvider` 陈旧类，并包含新的
-`CseRestTemplateProvider`。
+包含 `RemoteHeaderPolicy`、`ServletToolContextExtractor`、`RemoteToolInvocationFactory`、
+`RemoteToolWebClientProvider` 或 `CseRestTemplateProvider` 陈旧类。
 生产字符串扫描同时覆盖 starter 与同级消费端，确认两侧 `src/main/java` 的普通字符串和文本块均不存在中文
 字符；中文继续只用于 JavaDoc、注释及交付材料。
+
+函数参数上限检查：starter 与消费端分别增加编译字节码反射测试，扫描 `target/classes` 和
+`target/test-classes` 中全部非 synthetic 方法与构造器；测试同时覆盖显式源码、record 隐式构造器及 Lombok
+生成构造器，确认最大参数数量不超过 5。`ToolRegistration` 使用定义与行为值归组注册数据，`ToolAuditEvent`
+使用目标与详情值归组审计数据；`RemoteToolInvokerBinder` 使用绑定目标、调用端点、参数映射和单次远程请求值，
+保持 binder 不持有客户端且两个 handler 仍分别执行 WebClient 和 RestOperations 请求。
+
+消费端 `createOrder` 收敛为 5 个根级工具参数，继续覆盖自动 Path、集合 Query、业务 Header 以及
+`customerId`、`lines` 两个展开 Body 字段；CSE 工具继续覆盖标量 Query，API Fabric 返回值继续覆盖
+`deliveryDate` 日期转换。starter 53 个测试和消费端 5 个测试全部通过，其中各包含 1 个参数上限策略测试。
+
+结构检查使用与历史一致的 `javap -p` 口径：生产源码保持 17 个；为显式建模原先平铺的高维数据增加 8 个嵌套
+不可变类型，编译类由 32 个变为 40 个，构造器和方法由 220 个变为 246 个，没有增加顶层生产类型。
+remote 包保持 5 个生产源码、785 行和 11 个编译类。starter JAR 共 40 个 class，只包含
+`RemoteToolInvokerBinder` 及其嵌套计划类型，不包含旧 `RemoteToolBindingFactory`、`RemoteToolBinder`、
+`CseRestTemplateProvider` 或其他陈旧类。

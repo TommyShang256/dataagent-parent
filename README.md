@@ -102,21 +102,26 @@ API Fabric 将公共 `base-url` 与 `path-template` 组合。CSE 的完整 `cse:
 
 ## 提供 CSE RestTemplate
 
-starter 不内置公司环境相关的 CSE 实现。启用 CSE ref 时，应用必须通过公开扩展点
-`CseRestTemplateProvider` 返回能够处理 `cse://` URI 的 `RestOperations`：
+starter 不内置公司环境相关的 CSE 实现。启用 CSE ref 时，应用必须提供名称为 `cseRestOperations`、能够处理
+`cse://` URI 的 `RestOperations` Bean：
 
 ```java
-@Bean
-CseRestTemplateProvider cseRestTemplateProvider(RestTemplate companyCseRestTemplate) {
-  return () -> companyCseRestTemplate;
+@Bean(name = "cseRestOperations")
+RestOperations cseRestOperations(RestTemplate companyCseRestTemplate) {
+  return companyCseRestTemplate;
 }
 ```
 
-共享绑定器按最终 `Tool.Type` 选择执行通道：`API_FABRIC` 使用独立 WebClient，
-`CSE` 构造 `HttpEntity<Object>` 并调用
-`RestOperations.exchange(url, method, requestEntity, responseType)`。如果配置了 CSE ref 但未提供有效
-provider，应用会在发布工具目录前失败。API Fabric 使用 `opencode.mcp.request-timeout`；CSE 的超时由
-应用提供的 `RestOperations` 配置。两类通道的状态、连接和转换失败都会成为 `isError=true` 的 MCP 工具结果。
+两个默认处理器分别拥有完整的调用逻辑，互不持有对方的客户端依赖：
+`ApiFabricToolEndpointHandler` 直接持有独立 WebClient；`CseToolEndpointHandler` 直接持有上述
+`RestOperations`，构造 `HttpEntity<Object>` 并调用
+`RestOperations.exchange(url, method, requestEntity, responseType)`。共享绑定工厂只负责 Path、Query、Header、
+Body 和返回类型的参数映射，不根据 `Tool.Type` 选择客户端。scanner 根据 ref 选择唯一处理器，处理器在绑定时写入
+最终工具类型。
+
+如果配置了 CSE ref 但未提供 `cseRestOperations`，应用会在发布工具目录前失败。API Fabric 使用
+`opencode.mcp.request-timeout`；CSE 的超时由应用提供的 `RestOperations` 配置。两类通道的状态、连接和转换失败
+都会成为 `isError=true` 的 MCP 工具结果。
 
 ## 替换远程端点处理器
 

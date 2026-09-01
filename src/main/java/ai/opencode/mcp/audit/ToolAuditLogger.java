@@ -9,11 +9,11 @@ package ai.opencode.mcp.audit;
 @FunctionalInterface
 public interface ToolAuditLogger {
 
-  /**
-   * 记录一条工具审计事件。
-   *
-   * @param event 待记录的审计事件
-   * 返回值：无。
-   */
-  void record(ToolAuditEvent event);
+    /**
+     * 记录一条工具审计事件。
+     *
+     * @param event 待记录的审计事件
+     *              返回值：无。
+     */
+    void record(ToolAuditEvent event);
 }

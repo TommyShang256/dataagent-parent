@@ -113,7 +113,7 @@ Servlet transport 安装 `McpTransportContextExtractor<HttpServletRequest>`。�
 
 `ToolOrigin` 同时保存类别与 `sourceId`，但远程 `sourceId` 与 `@Tool.name`/端点 ref 重复，本地类名也只用于日志，不参与路由或调用。删除该包装类型，在 `Tool` 注解类型中声明嵌套枚举 `Type`，并由 `ToolRegistration` 保存扫描和端点绑定后解析出的最终类型。
 
-`Tool.Type` 包含 `LOCAL`、`API_FABRIC`、`CSE` 和 `CUSTOM`。前三项对应 starter 内置路径；`CUSTOM` 仅供公共 `RemoteToolEndpointHandler` 扩展实现标识自定义远程类别。类型不作为 `@Tool` 的可配置注解属性，避免注解值与端点配置发生冲突。审计事件只记录最终类型，不再记录重复的来源标识；共享绑定器按最终类型选择 WebClient 或 RestOperations 执行通道。
+`Tool.Type` 包含 `LOCAL`、`API_FABRIC`、`CSE` 和 `CUSTOM`。前三项对应 starter 内置路径；`CUSTOM` 仅供公共 `RemoteToolEndpointHandler` 扩展实现标识自定义远程类别。类型不作为 `@Tool` 的可配置注解属性，避免注解值与端点配置发生冲突。审计事件只记录最终类型，不再记录重复的来源标识；scanner 根据 ref 选择对应 handler，每个 handler 直接安装与自身 `Tool.Type` 一致的调用实现。
 
 备选方案：在 `@Tool` 上公开 `type` 属性。不采用，因为同一个注解工具是否远程及远程类别由配置绑定结果决定，手工属性会形成第二个不一致的事实来源。
 
@@ -129,18 +129,24 @@ SDK `ToolAnnotations`。该 record 没有校验、计算或独立扩展策略，
 
 ### 6. API Fabric 和 CSE 共享绑定规则但使用独立客户端
 
-增加 Spring WebFlux 客户端库但不改变 Servlet Server 技术栈，仅由 API Fabric 使用 WebClient。统一绑定工厂继续
-负责编译 URI、Query、Header、Body 和返回类型计划，执行阶段显式按最终 `Tool.Type` 选择客户端：
-`API_FABRIC` 进入 WebClient 分支，`CSE` 进入 RestOperations 分支。
+增加 Spring WebFlux 客户端库但不改变 Servlet Server 技术栈，仅由 API Fabric 使用 WebClient。统一绑定工厂只
+负责编译 URI、Query、Header、Body 和返回类型计划，不保存 WebClient、RestOperations 或按
+`Tool.Type` 选择客户端的分支。
 
 API Fabric URI 先组合已校验的基础 URL 与 path template，再展开 path 参数，并由独立 WebClient 执行。CSE 从完整
 URI template 开始，将最终 `cse://` URI、method、`HttpEntity` 和泛型返回类型交给 Spring `RestOperations`。
 CSE 不再经过 WebClient。
 
-新增公共 `CseRestTemplateProvider`，应用通过它返回公司环境增强后的 `RestOperations`。starter 不依赖 Apache
-ServiceComb，也不猜测公司内部服务发现、Header 或超时实现；默认 provider 是明确的占位实现，只要存在 CSE ref，
-handler 在绑定期取 client 时立即失败，避免发布一个必然运行期失败的工具。应用未配置 CSE ref 时占位 provider
-不影响本地工具和 API Fabric。
+`ApiFabricToolEndpointHandler` 直接持有 WebClient，其调用方法负责 API Fabric 响应的状态校验、超时等待和
+Jackson 转换。`CseToolEndpointHandler` 对称地直接持有 `RestOperations`，其调用方法显式构造
+`HttpEntity<Object>` 并调用 `exchange`。两个 handler 不互相注入对方的客户端，也不在 handler 内通过 provider
+二次取得客户端。
+
+应用以 Bean 名称 `cseRestOperations` 提供公司环境增强后的 `RestOperations`。自动配置使用
+`ObjectProvider<RestOperations>` 只处理“未配置客户端但仍需创建 handler 以完成端点目录校验”的可选装配问题，
+并将解析结果直接传给 CSE handler；该框架装配细节不进入远程调用路径，也不形成公共 provider SPI。starter 不
+依赖 Apache ServiceComb，也不猜测公司内部服务发现、Header 或超时实现。存在 CSE ref 但客户端缺失时，handler
+在绑定期失败；未配置 CSE ref 时不影响本地工具和 API Fabric。
 
 API Fabric 成功响应继续使用已配置的 `ObjectMapper` 按泛型返回类型转换。CSE 使用
 `ParameterizedTypeReference.forType` 将注解方法的完整返回类型交给 `RestOperations`。两类客户端的状态异常、
@@ -148,14 +154,15 @@ API Fabric 成功响应继续使用已配置的 `ObjectMapper` 按泛型返回�
 RestOperations 实现负责。
 
 备选方案：直接依赖 Apache ServiceComb `RestTemplateBuilder`。不采用，因为公司内部 CSE 实现与外部版本不同，
-starter 只应定义 Spring RestTemplate 扩展边界。备选方案：为 CSE 保留 WebClient provider。不采用，因为已明确
-CSE 不使用 WebClient。
+starter 只要求应用提供标准 Spring `RestOperations`。备选方案：保留 `CseRestTemplateProvider`。不采用，因为它
+只包装一个客户端并导致 CSE handler 在绑定时二次取值，与 API Fabric 直接持有客户端的结构不一致。备选方案：
+为 CSE 保留 WebClient provider。不采用，因为已明确 CSE 不使用 WebClient。
 
 ### 6.1 端点类别使用公共 SPI 并可独立替换
 
 增加公共 `RemoteToolEndpointHandler` 接口。每个实现负责声明自己的类别名称和端点引用，并把匹配的注解工具编译为远程 `ToolRegistration`。默认提供 `ApiFabricToolEndpointHandler` 和 `CseToolEndpointHandler` 两个实现；URI 组合、类别专属配置校验和最终工具类型选择由各自实现负责。
 
-`McpToolScanner` 汇总全部 handler 的引用，统一检查跨实现重复 ref、配置 ref 没有对应注解工具等目录级约束，再把匹配工具交给唯一 handler；没有匹配项的工具保持本地调用。请求参数划分、Header、Body、WebClient 执行和响应转换下沉到包内共享的调用计划工厂，避免两个 handler 重复实现协议行为。
+`McpToolScanner` 汇总全部 handler 的引用，统一检查跨实现重复 ref、配置 ref 没有对应注解工具等目录级约束，再把匹配工具交给唯一 handler；没有匹配项的工具保持本地调用。请求参数划分、Header 和 Body 组装下沉到包内共享绑定工厂；WebClient 或 RestOperations 调用、状态处理和响应转换分别由两个 handler 明确负责。
 
 项目尚未上线，不保留原先同时处理两类端点的 `RemoteToolEndpointBinder` 兼容适配器；测试和自动配置直接使用 scanner 及公共 handler SPI，避免形成重复入口。
 
@@ -174,17 +181,17 @@ CSE 不使用 WebClient。
 extractor，并以包级静态方法向共享远程绑定代码提供相同策略。排除集合和校验方法不再成为独立公共 API，
 transport context key 使用合并后类名，registry 仍只读取不可变多值 Header 映射。
 
-共享组件从 `RemoteToolInvocationFactory` 重命名为 `RemoteToolBindingFactory`，准确表达其职责是把注解方法和端点
-配置编译为远程 `ToolRegistration`。该组件继续以内部嵌套 invoker 保存不可变调用计划，不拆成额外的 compiler、
-plan 和 executor 类型。绑定期预计算不区分大小写的业务 Header 名称，运行期只应用当前请求参数和 Header；内部
-构造器使用 Lombok 消除样板，删除响应式调用不可能产生的 null 响应分支。
+共享组件从 `RemoteToolInvocationFactory` 重命名为 `RemoteToolInvokerBinder`，准确表达其职责是把注解方法和端点
+配置编译为远程 `ToolRegistration`。该组件继续以内部嵌套 invoker 保存不可变参数映射计划，不拆成额外的
+compiler、plan 和 executor 类型；它通过绑定时由单一 handler 提供的调用函数交出已经组装完成的请求，不持有
+任何远程客户端，也不包含按工具类型选择客户端的分支。绑定期预计算不区分大小写的业务 Header 名称，运行期只
+应用当前请求参数和 Header；内部构造器使用 Lombok 消除样板，删除响应式调用不可能产生的 null 响应分支。
 
 API Fabric handler 在组合 `base-url` 前验证 `path-template` 必须以单个 `/` 开头，拒绝绝对 URI、
 scheme-relative URI 和缺少根斜杠的模板。API Fabric 与 CSE 两个 handler 仍作为独立默认类存在；
-`RemoteToolEndpointHandler` 负责替换配置解释和绑定策略；API Fabric WebClient 与
-`CseRestTemplateProvider` 与独立 API Fabric WebClient 分别提供两类客户端，不再保留按
-`Tool.Type` 返回 WebClient 的公共 provider；`Tool.Type` 改由共享绑定器用于选择
-WebClient 或 RestOperations 执行分支。
+`RemoteToolEndpointHandler` 负责替换配置解释和绑定策略；API Fabric WebClient 与 CSE RestOperations 分别直接
+注入对应默认 handler，不再保留客户端 provider 类型或按 `Tool.Type` 返回客户端的公共 provider。
+`Tool.Type` 只表示绑定结果，不在共享工厂中作为客户端分支条件。
 
 备选方案：合并 API Fabric/CSE handler。不采用，因为会恢复类型分支并破坏独立替换边界。备选方案：要求自定义
 CSE handler 重写整个请求管线。不采用，因为应用只需要补充公司内部 RestTemplate 实现。
@@ -200,7 +207,7 @@ registry 添加任何 SDK tool specification 之前，先编译端点目录和�
 
 同级 `dataagent-mcp-test` 应用声明注解代理工具，其方法体在被执行时主动失败，并配置具有代表性的 API Fabric 和 CSE 引用。测试分别捕获 WebClient 和 RestOperations 请求并返回确定的 JSON。断言覆盖 method、URI、path 编码、重复 query 值、业务 Header、默认透传 Header、系统排除 Header、展开 Body、声明返回类型转换、本地 fallback 以及下游失败。
 
-starter 级测试覆盖配置绑定、校验诊断、context 提取、审计隔离、Header 请求隔离，以及 `cse` URI 原样到达 provider。
+starter 级测试覆盖配置绑定、校验诊断、context 提取、审计隔离、Header 请求隔离，以及 `cse` URI 原样到达客户端。
 
 ### 9. 生产运行时字符串统一使用英文
 
@@ -211,9 +218,27 @@ starter 自身定义的 SLF4J 日志模板、字段名、异常消息和断言�
 工具名称、调用参数、调用结果和下游异常属于外部动态值，必须保持原始业务含义，不做翻译、替换或丢弃。该约束
 不改变中文 JavaDoc、注释、README 和 OpenSpec；源码扫描只解析字符串字面量，不把注释误判为运行时内容。
 
+### 10. 所有函数最多接收五个参数
+
+starter 与消费端的生产、测试代码统一限制显式方法、构造器以及 record、Lombok 生成构造器最多接收 5 个参数。
+验证直接检查编译后的非 synthetic 方法和构造器，从而覆盖源码文本扫描无法识别的生成代码。
+
+高维数据按业务稳定性归组：`ToolRegistration` 将展示与 Schema 元数据、工具行为分别收敛为嵌套不可变值；
+`ToolAuditEvent` 将工具目标和调用详情分别归组；`RemoteToolInvokerBinder` 将端点绑定目标、参数映射和已组装远程请求
+建模为包内不可变值。API Fabric 与 CSE handler 继续只接收共享请求值并各自持有客户端，不把客户端或响应转换
+重新合并到 binder。registry 审计方法直接接收审计详情值，避免平行的 arguments、result、exception 参数。
+
+消费端示例工具同样遵守上限。`createOrder` 保留自动 Path、集合 Query、业务 Header，以及 `customerId`、`lines`
+两个展开 Body 字段；删除与 CSE 标量 Query 场景重复的 `dryRun` 输入和只用于响应转换验证的 `deliveryDate` 请求输入。
+返回值仍保留 `deliveryDate`，继续覆盖 Jackson 日期响应转换。
+
+备选方案：只限制显式源码签名。不采用，因为 record 和 Lombok 会生成超过上限的真实构造器。备选方案：引入单一
+`Parameters` 或 `Context` 参数袋。不采用，因为它会隐藏字段间职责并弱化类型边界。备选方案：把所有远程信息放入
+一个请求对象。不采用，因为绑定期端点计划、运行期参数映射和单次请求具有不同生命周期。
+
 ## Risks / Trade-offs
 
-- [starter 无法猜测公司内部 CSE RestTemplate 实现] → 只提供 `CseRestTemplateProvider` 边界，配置 CSE ref 但未提供实现时在发布目录前失败。
+- [starter 无法猜测公司内部 CSE RestTemplate 实现] → 要求应用提供命名为 `cseRestOperations` 的标准 `RestOperations` Bean，配置 CSE ref 但未提供时在发布目录前失败。
 - [公共 handler 允许应用增加端点类别，可能产生跨实现 ref 冲突] → 由 scanner 在目录发布前集中检查，禁止按 Bean 顺序静默覆盖。
 - [context-aware 调用重载可能被包装器意外绕过] → 为 registry 审计包装和实际 MCP call handler 中的远程调用增加契约测试。
 - [业务 Header 参数可能包含敏感值，当前审计会记录 arguments] → 保留现有已记录的审计契约，明确排除透传值，并建议应用对敏感业务参数进行审计脱敏。
@@ -226,7 +251,7 @@ starter 自身定义的 SLF4J 日志模板、字段名、异常消息和断言�
 
 1. 增加 WebClient 支持、端点属性、配置元数据、请求 context 和绑定组件；未配置端点时，现有应用继续使用本地注解工具。
 2. 使用现有注解工具名称作为 key，增加 API Fabric 或 CSE 端点配置；应用下次重启后，匹配的注解工具成为远程代理。
-3. 启用 `cse` 引用之前，通过 `CseRestTemplateProvider` 提供运行环境对应的 `RestOperations`。
+3. 启用 `cse` 引用之前，提供命名为 `cseRestOperations`、适配运行环境的 `RestOperations` Bean。
 4. 验证消费端模块，并确保部署后的每次 MCP 工具调用都携带所需请求 Header。
 5. 回滚时删除端点配置；重启后，相同注解方法恢复本地调用。
 
