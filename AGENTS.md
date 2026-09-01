@@ -33,7 +33,7 @@
 ## 当前 MCP 设计约束
 
 - MCP 只聚焦 Tools，不实现 Resources、Prompts 或运行时目录修改。
-- MCP HTTP 端点为 `/rest/mcp`。
+- MCP Agent HTTP 端点为 `/rest/mcp`，Script HTTP 端点默认为 `/rest/mcp/script`；两者都使用标准 Streamable HTTP MCP，调用者由服务端入口固定绑定。
 - 工具只通过 `@Tool` 声明，`@Tool.name` 同时作为远程端点 `ref`。
 - `Tool.Type` 表示绑定后的最终执行类别，由 scanner 和端点处理器自动确定，不作为 `@Tool` 参数手工配置。
 - API Fabric 与 CSE 使用公共 `RemoteToolEndpointHandler` SPI，并保留可独立替换的端点处理实现。
@@ -42,7 +42,7 @@
 - Path 参数由 URI template 占位符自动识别；Query 和业务 Header 显式配置；排除这些参数后，其余参数按原名自动组成展开的 JSON Body。
 - Header 配置只声明 `business`；其他允许的入站 Header 默认透传。透传 Header 不进入工具 Schema、arguments 或审计值。
 - 请求 Header 直接使用不可变的多值 `Map<String, List<String>>` 传递，不额外声明只做包装的调用上下文类型。
-- 当前只支持 JSON Body；multipart 文件上传保留为待办，不提前实现。
+- 支持 JSON Body 与 multipart 文件上传；multipart 文件参数使用字符串绝对 `filePath`，并允许同时存在普通表单参数与文本 part。
 
 ## 工作与验证方式
 

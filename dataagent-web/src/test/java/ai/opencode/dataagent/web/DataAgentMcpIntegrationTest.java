@@ -1,6 +1,7 @@
 package ai.opencode.dataagent.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -52,11 +53,15 @@ class DataAgentMcpIntegrationTest {
 
     private final AtomicInteger uploadCalls = new AtomicInteger();
 
+    private final AtomicInteger validateCalls = new AtomicInteger();
+
     private HttpServer apiFabric;
 
     private ConfigurableApplicationContext application;
 
-    private McpSyncClient client;
+    private McpSyncClient agentClient;
+
+    private McpSyncClient scriptClient;
 
     @BeforeEach
     void startServers() throws IOException {
@@ -67,6 +72,10 @@ class DataAgentMcpIntegrationTest {
             uploadCalls.incrementAndGet();
             capture(exchange, uploadRequest, "uploaded", "text/plain");
         });
+        apiFabric.createContext("/api/tables/validate", exchange -> {
+            validateCalls.incrementAndGet();
+            capture(exchange, new AtomicReference<>(), "validated", "text/plain");
+        });
         apiFabric.start();
 
         application = new SpringApplicationBuilder(DataAgentWebApplication.class)
@@ -76,24 +85,20 @@ class DataAgentMcpIntegrationTest {
                         "server.port=0",
                         "spring.main.banner-mode=off",
                         "spring.lifecycle.timeout-per-shutdown-phase=1s")
-                .run("--opencode.mcp.api-fabric.base-url=http://127.0.0.1:"
+                .run("--dataagent.mcp.api-fabric.base-url=http://127.0.0.1:"
                         + apiFabric.getAddress().getPort() + "/api");
         int port = ((WebServerApplicationContext) application).getWebServer().getPort();
-        HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport
-                .builder("http://127.0.0.1:" + port)
-                .endpoint("/rest/mcp")
-                .build();
-        client = McpClient.sync(transport)
-                .requestTimeout(Duration.ofSeconds(10))
-                .initializationTimeout(Duration.ofSeconds(10))
-                .build();
-        client.initialize();
+        agentClient = client(port, "/rest/mcp");
+        scriptClient = client(port, "/rest/mcp/script");
     }
 
     @AfterEach
     void stopServers() {
-        if (client != null) {
-            client.closeGracefully();
+        if (agentClient != null) {
+            agentClient.closeGracefully();
+        }
+        if (scriptClient != null) {
+            scriptClient.closeGracefully();
         }
         if (application != null) {
             application.close();
@@ -106,11 +111,16 @@ class DataAgentMcpIntegrationTest {
     @Test
     @DisplayName("标准 MCP 客户端初始化并发现 BFF 工具")
     void standardClientInitializesAndListsTools() {
-        McpSchema.ListToolsResult result = client.listTools();
-        assertThat(client.isInitialized()).isTrue();
-        assertThat(client.getServerInfo().name()).isEqualTo("dataagent-web");
+        McpSchema.ListToolsResult result = agentClient.listTools();
+        McpSchema.ListToolsResult scriptResult = scriptClient.listTools();
+        assertThat(agentClient.isInitialized()).isTrue();
+        assertThat(scriptClient.isInitialized()).isTrue();
+        assertThat(agentClient.getServerInfo().name()).isEqualTo("dataagent-web");
+        assertThat(scriptClient.getServerInfo().name()).isEqualTo("dataagent-web");
         assertThat(result.tools()).extracting(McpSchema.Tool::name)
                 .containsExactlyInAnyOrder("create_order", "upload_table");
+        assertThat(scriptResult.tools()).extracting(McpSchema.Tool::name)
+                .containsExactlyInAnyOrder("upload_table", "validate_table");
 
         McpSchema.Tool order = tool(result, "create_order");
         assertThat(properties(order)).containsKeys("orderId", "verbose", "headerA", "A", "customerId");
@@ -118,6 +128,12 @@ class DataAgentMcpIntegrationTest {
         McpSchema.Tool upload = tool(result, "upload_table");
         assertThat(properties(upload)).containsKeys("filePath", "catalog", "description");
         assertThat(properties(upload).get("filePath")).isInstanceOf(Map.class);
+        assertThat(order.meta().get("ai.opencode.dataagent/allowed-callers"))
+                .isEqualTo(List.of("agent"));
+        assertThat(upload.meta().get("ai.opencode.dataagent/allowed-callers"))
+                .isEqualTo(List.of("agent", "script"));
+        assertThat(tool(scriptResult, "validate_table").meta().get("ai.opencode.dataagent/allowed-callers"))
+                .isEqualTo(List.of("script"));
     }
 
     @Test
@@ -130,7 +146,7 @@ class DataAgentMcpIntegrationTest {
         arguments.put("A", "body-value");
         arguments.put("customerId", "C-1");
 
-        McpSchema.CallToolResult result = client.callTool(
+        McpSchema.CallToolResult result = agentClient.callTool(
                 new McpSchema.CallToolRequest("create_order", arguments));
         assertThat(result.isError()).isFalse();
         assertThat(((McpSchema.TextContent) result.content().getFirst()).text())
@@ -157,7 +173,7 @@ class DataAgentMcpIntegrationTest {
                 "catalog", "analytics",
                 "description", "integration upload");
 
-        McpSchema.CallToolResult result = client.callTool(
+        McpSchema.CallToolResult result = agentClient.callTool(
                 new McpSchema.CallToolRequest("upload_table", arguments));
         assertThat(result.isError()).isFalse();
         assertThat(((McpSchema.TextContent) result.content().getFirst()).text()).contains("uploaded");
@@ -178,7 +194,7 @@ class DataAgentMcpIntegrationTest {
     @DisplayName("不存在的上传文件不会请求 API Fabric")
     void missingUploadFileDoesNotCallApiFabric() {
         Path missing = temporaryDirectory.resolve("missing.dsl");
-        McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(
+        McpSchema.CallToolResult result = agentClient.callTool(new McpSchema.CallToolRequest(
                 "upload_table",
                 Map.of("filePath", missing.toString(), "catalog", "analytics")));
 
@@ -187,6 +203,82 @@ class DataAgentMcpIntegrationTest {
                 .contains("upload_table", "filePath", "does not exist");
         assertThat(uploadCalls).hasValue(0);
         assertThat(uploadRequest).hasValue(null);
+    }
+
+    @Test
+    @DisplayName("Script 可调用共享和 Script-only 工具")
+    void scriptCallsSharedAndScriptOnlyTools() throws IOException {
+        Path uploadFile = Files.writeString(temporaryDirectory.resolve("script.dsl"), "create table script_demo");
+        McpSchema.CallToolResult upload = scriptClient.callTool(scriptRequest(
+                "upload_table",
+                Map.of("filePath", uploadFile.toString(), "catalog", "script")));
+        McpSchema.CallToolResult validate = scriptClient.callTool(scriptRequest(
+                "validate_table",
+                Map.of("catalog", "script")));
+
+        assertThat(upload.isError()).isFalse();
+        assertThat(validate.isError()).isFalse();
+        assertThat(uploadCalls).hasValue(1);
+        assertThat(validateCalls).hasValue(1);
+    }
+
+    @Test
+    @DisplayName("Agent 与 Script 越权均在 API Fabric 前拒绝")
+    void callerPolicyRejectsBeforeApiFabric() {
+        assertThatThrownBy(() -> agentClient.callTool(
+                new McpSchema.CallToolRequest("validate_table", Map.of("catalog", "agent"))))
+                .hasMessageContaining("Unknown tool", "validate_table");
+        assertThatThrownBy(() -> scriptClient.callTool(scriptRequest(
+                "create_order",
+                Map.of("orderId", "O-1", "verbose", true, "headerA", "header", "A", "body"))))
+                .hasMessageContaining("Unknown tool", "create_order");
+        assertThat(validateCalls).hasValue(0);
+        assertThat(orderRequest).hasValue(null);
+    }
+
+    @Test
+    @DisplayName("客户端 caller 和不完整 Script 来源均在 API Fabric 前拒绝")
+    void rejectsCallerOverrideAndIncompleteScriptSourceBeforeApiFabric() {
+        McpSchema.CallToolResult callerOverride = agentClient.callTool(
+                McpSchema.CallToolRequest.builder("upload_table")
+                        .arguments(Map.of("filePath", "/tmp/not-used.dsl", "catalog", "not-used"))
+                        .meta(Map.of("ai.opencode.dataagent/caller", "script"))
+                        .build());
+        McpSchema.CallToolResult incompleteScriptSource = scriptClient.callTool(
+                new McpSchema.CallToolRequest("validate_table", Map.of("catalog", "script")));
+
+        assertThat(callerOverride.isError()).isTrue();
+        assertThat(((McpSchema.TextContent) callerOverride.content().getFirst()).text())
+                .contains("endpoint", "must not");
+        assertThat(incompleteScriptSource.isError()).isTrue();
+        assertThat(((McpSchema.TextContent) incompleteScriptSource.content().getFirst()).text())
+                .contains("requires", "trace");
+        assertThat(uploadCalls).hasValue(0);
+        assertThat(validateCalls).hasValue(0);
+    }
+
+    private static McpSchema.CallToolRequest scriptRequest(String name, Map<String, Object> arguments) {
+        return McpSchema.CallToolRequest.builder(name)
+                .arguments(arguments)
+                .meta(Map.of(
+                        "ai.opencode.dataagent/skill-id", "integration",
+                        "ai.opencode.dataagent/script-id", "run",
+                        "ai.opencode.dataagent/parent-call-id", "call-parent",
+                        "ai.opencode.dataagent/trace-id", "trace-integration"))
+                .build();
+    }
+
+    private static McpSyncClient client(int port, String endpoint) {
+        HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport
+                .builder("http://127.0.0.1:" + port)
+                .endpoint(endpoint)
+                .build();
+        McpSyncClient client = McpClient.sync(transport)
+                .requestTimeout(Duration.ofSeconds(10))
+                .initializationTimeout(Duration.ofSeconds(10))
+                .build();
+        client.initialize();
+        return client;
     }
 
     private static McpSchema.Tool tool(McpSchema.ListToolsResult result, String name) {

@@ -46,8 +46,9 @@ class DataAgentWebApplicationTest {
             McpFabricProperties properties = context.getBean(McpFabricProperties.class);
             assertThat(properties.getApiFabric().getBaseUrl()).isEqualTo("http://127.0.0.1:1/api");
             assertThat(properties.getEndpoint()).isEqualTo("/rest/mcp");
+            assertThat(properties.getScriptEndpoint()).isEqualTo("/rest/mcp/script");
             assertThat(context.getBean(ApiFabricTools.class)).isNotNull();
-            assertThat(context.getBean(McpSyncServer.class)).isNotNull();
+            assertThat(context.getBeansOfType(McpSyncServer.class)).hasSize(2);
             assertThat(((WebServerApplicationContext) context).getWebServer().getPort()).isPositive();
         }
     }
@@ -62,11 +63,13 @@ class DataAgentWebApplicationTest {
 
         assertThat(applicationConfig)
                 .contains("import: classpath:mcp-config.yml")
+                .doesNotContain("dataagent:")
                 .doesNotContain("opencode:");
         assertThat(mcpConfig)
-                .contains("opencode:")
+                .contains("dataagent:")
                 .contains("mcp:")
-                .contains("api-fabric:");
+                .contains("api-fabric:")
+                .doesNotContain("opencode:");
     }
 
     @Test
@@ -86,6 +89,6 @@ class DataAgentWebApplicationTest {
                         "server.port=0",
                         "spring.main.banner-mode=off",
                         "spring.lifecycle.timeout-per-shutdown-phase=1s")
-                .run("--opencode.mcp.api-fabric.base-url=" + baseUrl);
+                .run("--dataagent.mcp.api-fabric.base-url=" + baseUrl);
     }
 }

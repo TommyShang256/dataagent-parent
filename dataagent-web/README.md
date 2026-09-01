@@ -1,6 +1,7 @@
 # dataagent-web BFF
 
-`dataagent-web` 是 DataAgentSelf 的可执行 Spring Boot BFF。它依赖 `dataagent-mcp`，通过 `/rest/mcp` 发布标准 MCP Tools，并把工具调用映射到 API Fabric HTTP 接口。
+`dataagent-web` 是 DataAgentSelf 的可执行 Spring Boot BFF。它依赖 `dataagent-mcp`，通过 `/rest/mcp` 和
+`/rest/mcp/script` 发布隔离的标准 MCP Tools，并把工具调用映射到 API Fabric HTTP 接口。
 
 ## 启动
 
@@ -30,7 +31,7 @@ DATAAGENT_UPLOAD_TABLE_PATH=/tables \
 
 ## 配置文件边界
 
-`application.yml` 只保存 BFF 应用名称并通过 `spring.config.import` 导入 MCP 配置。MCP 服务元数据、API Fabric 基础地址和工具端点映射统一保存在 `mcp-config.yml`，不直接放入 `application.yml`。
+`application.yml` 只保存 BFF 应用名称并通过 `spring.config.import` 导入 MCP 配置。MCP 服务元数据、API Fabric 基础地址和工具端点映射统一保存在 `mcp-config.yml`，不直接放入 `application.yml`。该文件使用框架中立的 `dataagent.mcp` 配置命名空间，不以任何 Agent 客户端框架命名。
 
 两个文件都进入同一个 Spring Environment，因此环境变量、命令行参数和部署平台配置仍可覆盖 `mcp-config.yml` 中的本地默认值。
 
@@ -46,6 +47,36 @@ OpenCode 等支持 streamable HTTP 的 MCP Client 可配置为：
       "url": "http://127.0.0.1:8080/rest/mcp",
       "oauth": false
     }
+  }
+}
+```
+
+示例工具权限矩阵如下：
+
+| Tool | Agent | Skill Script |
+| --- | --- | --- |
+| `create_order` | 允许 | 拒绝 |
+| `upload_table` | 允许 | 允许 |
+| `validate_table` | 拒绝 | 允许 |
+
+Opencode 保持上述 Agent 配置，不需要任何源码改动。Skill Script 使用标准 MCP Client 连接
+`http://127.0.0.1:8080/rest/mcp/script`。两个入口分别固定绑定 `AGENT` 与 `SCRIPT`，客户端不能通过 `_meta`
+切换 caller。
+
+调用者策略不代替 MCP Client 身份认证。生产部署应由网关、Spring Security、OAuth、mTLS 或网络策略保护 Script
+入口；starter 不要求 Script 专用 Token、Header 或环境变量。
+
+Skill Script 的标准 `tools/call` 可以携带审计来源 `_meta`，业务 `arguments` 不包含这些字段：
+
+```json
+{
+  "name": "validate_table",
+  "arguments": { "catalog": "analytics" },
+  "_meta": {
+    "ai.opencode.dataagent/skill-id": "table-management",
+    "ai.opencode.dataagent/script-id": "validate",
+    "ai.opencode.dataagent/parent-call-id": "call-parent",
+    "ai.opencode.dataagent/trace-id": "trace-id"
   }
 }
 ```

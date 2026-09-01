@@ -24,7 +24,7 @@ class McpFabricPropertiesTest {
     @Test
     @DisplayName("空配置生成确定的空端点映射")
     void emptyConfigurationHasDeterministicEmptyEndpointMaps() {
-        var properties = new McpFabricProperties();
+        McpFabricProperties properties = new McpFabricProperties();
         assertThat(properties.getApiFabric().getEndpoints()).isEmpty();
         assertThat(properties.getCse().getEndpoints()).isEmpty();
         assertThat(properties.getMaxUploadFileSize()).isEqualTo(DataSize.ofMegabytes(100));
@@ -33,20 +33,23 @@ class McpFabricPropertiesTest {
     @Test
     @DisplayName("绑定文档约定的 API Fabric 与 CSE 配置结构")
     void bindsDocumentedFabricAndCseShape() {
-        var source = new MapConfigurationPropertySource(Map.ofEntries(
-                Map.entry("opencode.mcp.api-fabric.base-url", "https://fabric.example/api"),
-                Map.entry("opencode.mcp.api-fabric.endpoints.create-order.method", "POST"),
-                Map.entry("opencode.mcp.api-fabric.endpoints.create-order.path-template", "/orders/{orderId}"),
-                Map.entry("opencode.mcp.api-fabric.endpoints.create-order.query.dry_run", "dryRun"),
-                Map.entry("opencode.mcp.api-fabric.endpoints.create-order.files.dsl", "filePath"),
-                Map.entry("opencode.mcp.api-fabric.endpoints.create-order.headers.business.X-Biz-Mode", "bizMode"),
-                Map.entry("opencode.mcp.max-upload-file-size", "8MB"),
-                Map.entry("opencode.mcp.cse.endpoints.reserve.method", "PUT"),
-                Map.entry("opencode.mcp.cse.endpoints.reserve.uri-template", "cse://inventory/items/{sku}")));
-        var properties = new Binder(source).bind("opencode.mcp", Bindable.of(McpFabricProperties.class)).get();
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(Map.ofEntries(
+                Map.entry("dataagent.mcp.api-fabric.base-url", "https://fabric.example/api"),
+                Map.entry("dataagent.mcp.api-fabric.endpoints.create-order.method", "POST"),
+                Map.entry("dataagent.mcp.api-fabric.endpoints.create-order.path-template", "/orders/{orderId}"),
+                Map.entry("dataagent.mcp.api-fabric.endpoints.create-order.query.dry_run", "dryRun"),
+                Map.entry("dataagent.mcp.api-fabric.endpoints.create-order.files.dsl", "filePath"),
+                Map.entry("dataagent.mcp.api-fabric.endpoints.create-order.headers.business.X-Biz-Mode", "bizMode"),
+                Map.entry("dataagent.mcp.max-upload-file-size", "8MB"),
+                Map.entry("dataagent.mcp.cse.endpoints.reserve.method", "PUT"),
+                Map.entry("dataagent.mcp.cse.endpoints.reserve.uri-template", "cse://inventory/items/{sku}")));
+        McpFabricProperties properties = new Binder(source)
+                .bind("dataagent.mcp", Bindable.of(McpFabricProperties.class))
+                .get();
 
         assertThat(properties.getApiFabric().getBaseUrl()).isEqualTo("https://fabric.example/api");
-        var fabric = properties.getApiFabric().getEndpoints().get("create-order");
+        McpFabricProperties.ApiFabricEndpoint fabric =
+                properties.getApiFabric().getEndpoints().get("create-order");
         assertThat(fabric.getMethod()).isEqualTo("POST");
         assertThat(fabric.getPathTemplate()).isEqualTo("/orders/{orderId}");
         assertThat(fabric.getQuery()).containsEntry("dry_run", "dryRun");
@@ -55,6 +58,16 @@ class McpFabricPropertiesTest {
         assertThat(properties.getMaxUploadFileSize()).isEqualTo(DataSize.ofMegabytes(8));
         assertThat(properties.getCse().getEndpoints().get("reserve").getUriTemplate())
                 .isEqualTo("cse://inventory/items/{sku}");
+    }
+
+    @Test
+    @DisplayName("旧 Agent 框架配置命名空间不再绑定")
+    void doesNotBindLegacyAgentFrameworkNamespace() {
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(
+                Map.of("opencode.mcp.enabled", "false"));
+
+        assertThat(new Binder(source).bind("dataagent.mcp", Bindable.of(McpFabricProperties.class)).isBound())
+                .isFalse();
     }
 
     @Test

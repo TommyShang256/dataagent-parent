@@ -15,6 +15,7 @@ import ai.opencode.mcp.remote.CseToolEndpointHandler;
 import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import ai.opencode.mcp.scanner.McpToolScanner;
 import io.modelcontextprotocol.server.McpSyncServer;
+import io.modelcontextprotocol.spec.McpSchema;
 
 import java.util.List;
 import java.util.Map;
@@ -52,8 +53,12 @@ class McpFabricAutoConfigurationTest {
         runner.run(context -> {
             assertThat(context).hasSingleBean(McpToolScanner.class);
             assertThat(context).hasSingleBean(McpToolRegistry.class);
-            var servletRegistration = (ServletRegistrationBean<?>) context.getBean("mcpServletRegistration");
-            assertThat(servletRegistration.getUrlMappings()).containsExactly("/rest/mcp");
+            ServletRegistrationBean<?> agentRegistration =
+                    (ServletRegistrationBean<?>) context.getBean("agentMcpServletRegistration");
+            ServletRegistrationBean<?> scriptRegistration =
+                    (ServletRegistrationBean<?>) context.getBean("scriptMcpServletRegistration");
+            assertThat(agentRegistration.getUrlMappings()).containsExactly("/rest/mcp");
+            assertThat(scriptRegistration.getUrlMappings()).containsExactly("/rest/mcp/script");
             var tools = context.getBean(McpToolRegistry.class).tools();
             assertThat(tools).extracting(ToolRegistration::name)
                     .containsExactlyInAnyOrder("local_echo", "second_echo", "third_echo", "failing_tool");
@@ -120,8 +125,8 @@ class McpFabricAutoConfigurationTest {
     @DisplayName("仅声明 Tools 能力并发布启动目录")
     void advertisesOnlyToolsAndPublishesStartupCatalog() {
         runner.run(context -> {
-            var server = context.getBean(McpSyncServer.class);
-            var capabilities = server.getServerCapabilities();
+            McpSyncServer server = context.getBean("agentMcpServer", McpSyncServer.class);
+            McpSchema.ServerCapabilities capabilities = server.getServerCapabilities();
 
             assertThat(capabilities.tools()).isNotNull();
             assertThat(capabilities.tools().listChanged()).isFalse();
@@ -136,7 +141,7 @@ class McpFabricAutoConfigurationTest {
     @Test
     @DisplayName("可以禁用全部 MCP 基础设施")
     void canDisableAllMcpInfrastructure() {
-        runner.withPropertyValues("opencode.mcp.enabled=false").run(context -> {
+        runner.withPropertyValues("dataagent.mcp.enabled=false").run(context -> {
             assertThat(context).doesNotHaveBean(McpSyncServer.class);
             assertThat(context).doesNotHaveBean(McpToolScanner.class);
             assertThat(context).doesNotHaveBean(McpToolRegistry.class);
@@ -148,9 +153,28 @@ class McpFabricAutoConfigurationTest {
     @Test
     @DisplayName("归一化缺少前导斜杠的 MCP 端点")
     void normalizesEndpointWithoutLeadingSlash() {
-        runner.withPropertyValues("opencode.mcp.endpoint=company-mcp").run(context -> {
-            var registration = (ServletRegistrationBean<?>) context.getBean("mcpServletRegistration");
-            assertThat(registration.getUrlMappings()).containsExactly("/company-mcp");
+        runner.withPropertyValues(
+                "dataagent.mcp.endpoint=company-mcp",
+                "dataagent.mcp.script-endpoint=company-mcp/script").run(context -> {
+            ServletRegistrationBean<?> agent =
+                    (ServletRegistrationBean<?>) context.getBean("agentMcpServletRegistration");
+            ServletRegistrationBean<?> script =
+                    (ServletRegistrationBean<?>) context.getBean("scriptMcpServletRegistration");
+            assertThat(agent.getUrlMappings()).containsExactly("/company-mcp");
+            assertThat(script.getUrlMappings()).containsExactly("/company-mcp/script");
+        });
+    }
+
+    @Test
+    @DisplayName("拒绝 Agent 与 Script 使用相同端点")
+    void rejectsIdenticalAgentAndScriptEndpoints() {
+        runner.withPropertyValues(
+                "dataagent.mcp.endpoint=/same",
+                "dataagent.mcp.script-endpoint=/same").run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .hasStackTraceContaining("endpoints must be different")
+                    .hasStackTraceContaining("/same");
         });
     }
 
@@ -190,8 +214,8 @@ class McpFabricAutoConfigurationTest {
 
     private WebApplicationContextRunner cseRunner() {
         return runner.withPropertyValues(
-                "opencode.mcp.cse.endpoints.local_echo.method=POST",
-                "opencode.mcp.cse.endpoints.local_echo.uri-template=cse://echo-service/messages/{message}");
+                "dataagent.mcp.cse.endpoints.local_echo.method=POST",
+                "dataagent.mcp.cse.endpoints.local_echo.uri-template=cse://echo-service/messages/{message}");
     }
 
     @Test

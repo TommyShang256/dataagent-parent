@@ -5,6 +5,7 @@ import ai.opencode.mcp.annotation.Tool;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 承载注解工具在启动期扫描和远程端点绑定后的标准化定义。
@@ -115,6 +116,15 @@ public record ToolRegistration(
   }
 
   /**
+   * 获取允许调用当前工具的调用者集合。
+   *
+   * @return 不可变调用者集合
+   */
+  public Set<Tool.Caller> allowedCallers() {
+    return behavior.allowedCallers;
+  }
+
+  /**
    * 复制当前注册信息并替换工具执行类别。
    *
    * @param value 新的工具执行类别
@@ -169,6 +179,7 @@ public record ToolRegistration(
     private final boolean destructive;
     private final boolean idempotent;
     private final boolean openWorld;
+    private final Set<Tool.Caller> allowedCallers;
 
     /**
      * 创建工具行为属性。
@@ -177,12 +188,25 @@ public record ToolRegistration(
      * @param destructive 工具是否可能产生破坏性变更
      * @param idempotent 工具是否幂等
      * @param openWorld 工具是否可能访问外部实体
+     * @param allowedCallers 允许调用工具的调用者集合
      */
-    public Behavior(boolean readOnly, boolean destructive, boolean idempotent, boolean openWorld) {
+    public Behavior(
+        boolean readOnly,
+        boolean destructive,
+        boolean idempotent,
+        boolean openWorld,
+        Set<Tool.Caller> allowedCallers) {
+      if (allowedCallers == null || allowedCallers.isEmpty()) {
+        throw new IllegalArgumentException("Tool allowedCallers must not be empty");
+      }
+      if (allowedCallers.stream().anyMatch(java.util.Objects::isNull)) {
+        throw new IllegalArgumentException("Tool allowedCallers must not contain null");
+      }
       this.readOnly = readOnly;
       this.destructive = destructive;
       this.idempotent = idempotent;
       this.openWorld = openWorld;
+      this.allowedCallers = Set.copyOf(allowedCallers);
     }
   }
 }

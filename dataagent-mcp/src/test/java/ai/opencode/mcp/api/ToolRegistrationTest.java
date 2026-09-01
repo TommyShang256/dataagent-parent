@@ -6,7 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import ai.opencode.mcp.annotation.Tool;
 
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,7 +25,7 @@ class ToolRegistrationTest {
             new ToolRegistration.Definition(null, null, Map.of("type", "object"));
 
     private static final ToolRegistration.Behavior BEHAVIOR =
-            new ToolRegistration.Behavior(true, false, true, false);
+            new ToolRegistration.Behavior(true, false, true, false, Set.of(Tool.Caller.AGENT));
 
     private static final ToolInvoker INVOKER = arguments -> "ok";
 
@@ -42,6 +44,15 @@ class ToolRegistrationTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("type");
         assertThatThrownBy(() -> registration("tool", DEFINITION, INVOKER, Tool.Type.LOCAL, null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("behavior");
+        assertThatThrownBy(() -> new ToolRegistration.Behavior(true, false, true, false, Set.of()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("allowedCallers");
+        assertThatThrownBy(() -> new ToolRegistration.Behavior(true, false, true, false, null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("allowedCallers");
+        HashSet<Tool.Caller> callersWithNull = new HashSet<>();
+        callersWithNull.add(null);
+        assertThatThrownBy(() -> new ToolRegistration.Behavior(
+                true, false, true, false, callersWithNull))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("null");
     }
 
     @Test
@@ -61,6 +72,7 @@ class ToolRegistrationTest {
         assertThat(registration.destructive()).isFalse();
         assertThat(registration.idempotent()).isTrue();
         assertThat(registration.openWorld()).isFalse();
+        assertThat(registration.allowedCallers()).containsExactly(Tool.Caller.AGENT);
 
         ToolInvoker replacement = arguments -> "replacement";
         assertThat(registration.withType(Tool.Type.CSE).type()).isEqualTo(Tool.Type.CSE);

@@ -41,7 +41,7 @@ import org.springframework.web.client.RestOperations;
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @ConditionalOnClass({McpServer.class, ServletRegistrationBean.class})
-@ConditionalOnProperty(prefix = "opencode.mcp", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "dataagent.mcp", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(McpFabricProperties.class)
 public class McpFabricAutoConfiguration {
 
@@ -51,14 +51,28 @@ public class McpFabricAutoConfiguration {
         return new JacksonMcpJsonMapper(objectMapper);
     }
 
-    @Bean(destroyMethod = "closeGracefully")
-    @ConditionalOnMissingBean
-    HttpServletStreamableServerTransportProvider mcpTransport(
+    @Bean(name = "agentMcpTransport", destroyMethod = "closeGracefully")
+    @ConditionalOnMissingBean(name = "agentMcpTransport")
+    HttpServletStreamableServerTransportProvider agentMcpTransport(
             McpJsonMapper jsonMapper, McpFabricProperties properties) {
+        return transport(jsonMapper, properties, properties.getEndpoint());
+    }
+
+    @Bean(name = "scriptMcpTransport", destroyMethod = "closeGracefully")
+    @ConditionalOnMissingBean(name = "scriptMcpTransport")
+    HttpServletStreamableServerTransportProvider scriptMcpTransport(
+            McpJsonMapper jsonMapper, McpFabricProperties properties) {
+        return transport(jsonMapper, properties, properties.getScriptEndpoint());
+    }
+
+    private static HttpServletStreamableServerTransportProvider transport(
+            McpJsonMapper jsonMapper,
+            McpFabricProperties properties,
+            String endpoint) {
         HttpServletStreamableServerTransportProvider.Builder builder =
                 HttpServletStreamableServerTransportProvider.builder()
                         .jsonMapper(jsonMapper)
-                        .mcpEndpoint(normalizeEndpoint(properties.getEndpoint()))
+                        .mcpEndpoint(normalizeEndpoint(endpoint))
                         .contextExtractor(new RemoteRequestHeaders())
                         .maxRequestSize(Math.toIntExact(properties.getMaxRequestSize().toBytes()));
         if (properties.getKeepAlive() != null) {
@@ -67,22 +81,55 @@ public class McpFabricAutoConfiguration {
         return builder.build();
     }
 
-    @Bean
-    @ConditionalOnMissingBean(name = "mcpServletRegistration")
-    ServletRegistrationBean<HttpServletStreamableServerTransportProvider> mcpServletRegistration(
-            HttpServletStreamableServerTransportProvider transport, McpFabricProperties properties) {
+    @Bean(name = "agentMcpServletRegistration")
+    @ConditionalOnMissingBean(name = "agentMcpServletRegistration")
+    ServletRegistrationBean<HttpServletStreamableServerTransportProvider> agentMcpServletRegistration(
+            @Qualifier("agentMcpTransport") HttpServletStreamableServerTransportProvider transport,
+            McpFabricProperties properties) {
         String endpoint = normalizeEndpoint(properties.getEndpoint());
+        requireDistinctEndpoints(endpoint, normalizeEndpoint(properties.getScriptEndpoint()));
         ServletRegistrationBean<HttpServletStreamableServerTransportProvider> registration =
                 new ServletRegistrationBean<>(transport, endpoint);
-        registration.setName("opencodeMcpServlet");
+        registration.setName("dataagentAgentMcpServlet");
         registration.setAsyncSupported(true);
         registration.setLoadOnStartup(1);
         return registration;
     }
 
-    @Bean(destroyMethod = "closeGracefully")
-    @ConditionalOnMissingBean
-    McpSyncServer mcpServer(
+    @Bean(name = "scriptMcpServletRegistration")
+    @ConditionalOnMissingBean(name = "scriptMcpServletRegistration")
+    ServletRegistrationBean<HttpServletStreamableServerTransportProvider> scriptMcpServletRegistration(
+            @Qualifier("scriptMcpTransport") HttpServletStreamableServerTransportProvider transport,
+            McpFabricProperties properties) {
+        String endpoint = normalizeEndpoint(properties.getScriptEndpoint());
+        requireDistinctEndpoints(normalizeEndpoint(properties.getEndpoint()), endpoint);
+        ServletRegistrationBean<HttpServletStreamableServerTransportProvider> registration =
+                new ServletRegistrationBean<>(transport, endpoint);
+        registration.setName("dataagentScriptMcpServlet");
+        registration.setAsyncSupported(true);
+        registration.setLoadOnStartup(1);
+        return registration;
+    }
+
+    @Bean(name = "agentMcpServer", destroyMethod = "closeGracefully")
+    @ConditionalOnMissingBean(name = "agentMcpServer")
+    McpSyncServer agentMcpServer(
+            @Qualifier("agentMcpTransport") HttpServletStreamableServerTransportProvider transport,
+            McpJsonMapper jsonMapper,
+            McpFabricProperties properties) {
+        return server(transport, jsonMapper, properties);
+    }
+
+    @Bean(name = "scriptMcpServer", destroyMethod = "closeGracefully")
+    @ConditionalOnMissingBean(name = "scriptMcpServer")
+    McpSyncServer scriptMcpServer(
+            @Qualifier("scriptMcpTransport") HttpServletStreamableServerTransportProvider transport,
+            McpJsonMapper jsonMapper,
+            McpFabricProperties properties) {
+        return server(transport, jsonMapper, properties);
+    }
+
+    private static McpSyncServer server(
             HttpServletStreamableServerTransportProvider transport,
             McpJsonMapper jsonMapper,
             McpFabricProperties properties) {
@@ -138,9 +185,10 @@ public class McpFabricAutoConfiguration {
     McpToolRegistry mcpToolRegistry(
             McpToolScanner scanner,
             ObjectMapper objectMapper,
-            McpSyncServer server,
+            @Qualifier("agentMcpServer") McpSyncServer agentServer,
+            @Qualifier("scriptMcpServer") McpSyncServer scriptServer,
             ToolAuditLogger auditLogger) {
-        return new McpToolRegistry(scanner, objectMapper, server, auditLogger);
+        return new McpToolRegistry(scanner, objectMapper, agentServer, scriptServer, auditLogger);
     }
 
     private static String normalizeEndpoint(String endpoint) {
@@ -148,5 +196,11 @@ public class McpFabricAutoConfiguration {
             throw new IllegalArgumentException("MCP endpoint must not be blank");
         }
         return endpoint.startsWith("/") ? endpoint : "/" + endpoint;
+    }
+
+    private static void requireDistinctEndpoints(String agentEndpoint, String scriptEndpoint) {
+        if (agentEndpoint.equals(scriptEndpoint)) {
+            throw new IllegalArgumentException("MCP Agent and Script endpoints must be different: " + agentEndpoint);
+        }
     }
 }

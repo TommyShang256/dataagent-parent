@@ -43,13 +43,47 @@ public class OrderTools {
 `@Tool.name` 同时是远程端点的 `ref`。一个 ref 只要出现在 API Fabric 或 CSE 配置中，方法签名仍负责
 生成 Agent 可见的 JSON Schema，但方法体不会执行；`tools/call` 改为请求配置的下游端点。
 
+## Agent 与 Skill Script 调用权限
+
+每个 Tool 都有不可为空的调用者集合。未配置时默认仅允许 Agent：
+
+```java
+@Tool(name = "agent_only")
+public String agentOnly(String value) {
+  return value;
+}
+
+@Tool(name = "script_only", allowedCallers = Tool.Caller.SCRIPT)
+public String scriptOnly(String value) {
+  return value;
+}
+
+@Tool(name = "shared", allowedCallers = {Tool.Caller.AGENT, Tool.Caller.SCRIPT})
+public String shared(String value) {
+  return value;
+}
+```
+
+starter 创建两个标准 Streamable HTTP MCP 入口：`/rest/mcp` 固定绑定 `AGENT`，`/rest/mcp/script` 固定绑定
+`SCRIPT`。Tool 只发布到 `allowedCallers` 包含的入口，共享 Tool 发布到两个入口；因此 Agent 看不到 Script-only
+Tool，Script 也看不到 Agent-only Tool。每次 `tools/call` 仍会在 invoker 前重新校验入口调用者。
+
+客户端不得在 `_meta` 中声明 `ai.opencode.dataagent/caller`，该保留字段会被拒绝。Script 调用需要在 `_meta` 中提供
+`skill-id`、`script-id`、`parent-call-id` 和 `trace-id` 审计链；这些字段不会进入业务 arguments、远程 Path、
+Query、Header、JSON Body 或 multipart part。Opencode 保持连接 Agent 入口，无需修改源码；Script 使用任意标准
+MCP Client 连接 Script 入口。
+
+入口绑定负责 Tool 授权来源，不等于客户端身份认证。生产部署必须由网关、Spring Security、OAuth、mTLS 或网络
+策略保护 Script 路径，避免非 Script Client 主动访问；starter 不增加 Script 专用 Token 或环境变量。
+
 ## API Fabric 与 CSE 配置
 
 ```yaml
-opencode:
+dataagent:
   mcp:
     enabled: true
     endpoint: /rest/mcp
+    script-endpoint: /rest/mcp/script
     server-name: dataagent-mcp
     server-version: 0.1.0
     request-timeout: 5m
@@ -128,7 +162,7 @@ Body 和返回类型的参数映射，不根据 `Tool.Type` 选择客户端。sc
 最终工具类型。
 
 如果配置了 CSE ref 但未提供 `cseRestOperations`，应用会在发布工具目录前失败。API Fabric 使用
-`opencode.mcp.request-timeout`；CSE 的超时由应用提供的 `RestOperations` 配置。两类通道的状态、连接和转换失败
+`dataagent.mcp.request-timeout`；CSE 的超时由应用提供的 `RestOperations` 配置。两类通道的状态、连接和转换失败
 都会成为 `isError=true` 的 MCP 工具结果。
 
 ## 替换远程端点处理器
@@ -199,7 +233,7 @@ public void createTable(
 ```
 
 上传前会校验路径非空、语法有效、存在、为可读普通文件并且不超过
-`opencode.mcp.max-upload-file-size`，默认上限为 `100MB`。文件名取路径末段；无法探测媒体类型时使用
+`dataagent.mcp.max-upload-file-size`，默认上限为 `100MB`。文件名取路径末段；无法探测媒体类型时使用
 `application/octet-stream`。API Fabric 与 CSE 都使用文件 Resource 写出内容，不先把完整文件载入 byte 数组。
 
 starter 不限制文件根目录，也允许解析到普通文件的符号链接；部署方必须由 BFF 沙箱或进程文件权限限制可读取范围。
@@ -214,4 +248,5 @@ starter 不限制文件根目录，也允许解析到普通文件的符号链接
 mvn clean verify
 ```
 
-默认 MCP 地址为 `http://localhost:8080/rest/mcp`。
+默认 Agent MCP 地址为 `http://localhost:8080/rest/mcp`，Script MCP 地址为
+`http://localhost:8080/rest/mcp/script`。

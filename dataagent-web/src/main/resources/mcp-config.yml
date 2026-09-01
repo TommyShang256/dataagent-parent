@@ -1,6 +1,7 @@
-opencode:
+dataagent:
   mcp:
     endpoint: /rest/mcp
+    script-endpoint: /rest/mcp/script
     server-name: dataagent-web
     server-version: 0.1.0
     api-fabric:
@@ -19,3 +20,6 @@ opencode:
           path-template: "${DATAAGENT_UPLOAD_TABLE_PATH:/tables}"
           files:
             dsl: filePath
+        validate_table:
+          method: POST
+          path-template: "${DATAAGENT_VALIDATE_TABLE_PATH:/tables/validate}"

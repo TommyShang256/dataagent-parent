@@ -6,14 +6,14 @@ Defines a focused Tools-only MCP runtime that publishes a startup-fixed catalog 
 ## Requirements
 
 ### Requirement: Conditional MCP server activation
-The starter SHALL create a stateful Streamable HTTP MCP endpoint in a servlet web application when `opencode.mcp.enabled` is true or absent, and SHALL not create the MCP infrastructure when the property is false.
+The starter SHALL create a stateful Streamable HTTP MCP endpoint in a servlet web application when `dataagent.mcp.enabled` is true or absent, and SHALL not create the MCP infrastructure when the property is false.
 
 #### Scenario: Default activation
-- **WHEN** a servlet Spring Boot application includes the starter without setting `opencode.mcp.enabled`
+- **WHEN** a servlet Spring Boot application includes the starter without setting `dataagent.mcp.enabled`
 - **THEN** the application exposes an MCP endpoint at `/mcp`
 
 #### Scenario: Explicit deactivation
-- **WHEN** the application sets `opencode.mcp.enabled=false`
+- **WHEN** the application sets `dataagent.mcp.enabled=false`
 - **THEN** the starter does not create the MCP transport, server, scanner, or registry
 
 ### Requirement: Tools-only MCP surface

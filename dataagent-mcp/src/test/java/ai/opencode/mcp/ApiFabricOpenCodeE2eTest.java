@@ -78,7 +78,11 @@ class ApiFabricOpenCodeE2eTest {
                 name: "upload_table",
                 args: { filePath, description: "opencode upload" },
               })
-              return { tools: tools.map((tool) => tool.name), call, upload }
+              return {
+                tools: tools.map((tool) => ({ name: tool.name })),
+                call,
+                upload,
+              }
             })))
 
             process.stdout.write(JSON.stringify(result))
@@ -106,7 +110,9 @@ class ApiFabricOpenCodeE2eTest {
             int mcpPort = ((WebServerApplicationContext) application).getWebServer().getPort();
             JsonNode clientResult = runOpenCodeClient(opencodeRepository, mcpPort, uploadFile);
 
-            assertThat(clientResult.path("tools").toString()).contains("\"create_order\"", "\"upload_table\"");
+            assertThat(clientResult.path("tools").toString())
+                    .contains("\"create_order\"", "\"upload_table\"")
+                    .doesNotContain("\"validate_table\"");
             assertThat(clientResult.path("call").path("isError").asBoolean())
                     .as(clientResult.toPrettyString()).isFalse();
             assertThat(clientResult.path("call").path("content").get(0).path("type").asText()).isEqualTo("text");
@@ -152,14 +158,16 @@ class ApiFabricOpenCodeE2eTest {
                         "server.port=0",
                         "spring.main.banner-mode=off",
                         "spring.lifecycle.timeout-per-shutdown-phase=1s",
-                        "opencode.mcp.api-fabric.base-url=http://127.0.0.1:" + apiFabricPort + "/api",
-                        "opencode.mcp.api-fabric.endpoints.create_order.method=POST",
-                        "opencode.mcp.api-fabric.endpoints.create_order.path-template=/orders/{orderId}",
-                        "opencode.mcp.api-fabric.endpoints.create_order.query.verbose=verbose",
-                        "opencode.mcp.api-fabric.endpoints.create_order.headers.business.X-Biz-Mode=bizMode",
-                        "opencode.mcp.api-fabric.endpoints.upload_table.method=POST",
-                        "opencode.mcp.api-fabric.endpoints.upload_table.path-template=/tables",
-                        "opencode.mcp.api-fabric.endpoints.upload_table.files.dsl=filePath")
+                        "dataagent.mcp.api-fabric.base-url=http://127.0.0.1:" + apiFabricPort + "/api",
+                        "dataagent.mcp.api-fabric.endpoints.create_order.method=POST",
+                        "dataagent.mcp.api-fabric.endpoints.create_order.path-template=/orders/{orderId}",
+                        "dataagent.mcp.api-fabric.endpoints.create_order.query.verbose=verbose",
+                        "dataagent.mcp.api-fabric.endpoints.create_order.headers.business.X-Biz-Mode=bizMode",
+                        "dataagent.mcp.api-fabric.endpoints.upload_table.method=POST",
+                        "dataagent.mcp.api-fabric.endpoints.upload_table.path-template=/tables",
+                        "dataagent.mcp.api-fabric.endpoints.upload_table.files.dsl=filePath",
+                        "dataagent.mcp.api-fabric.endpoints.validate_table.method=POST",
+                        "dataagent.mcp.api-fabric.endpoints.validate_table.path-template=/tables/validate")
                 .run();
     }
 
@@ -203,9 +211,14 @@ class ApiFabricOpenCodeE2eTest {
 
     private static Path opencodeRepository() {
         String configured = System.getProperty("opencode.repository");
-        return configured == null || configured.isBlank()
-                ? Path.of("..", "opencode").toAbsolutePath().normalize()
-                : Path.of(configured).toAbsolutePath().normalize();
+        if (configured != null && !configured.isBlank()) {
+            return Path.of(configured).toAbsolutePath().normalize();
+        }
+        Path siblingFromReactor = Path.of("..", "opencode").toAbsolutePath().normalize();
+        if (Files.isRegularFile(siblingFromReactor.resolve("packages/core/package.json"))) {
+            return siblingFromReactor;
+        }
+        return Path.of("..", "..", "opencode").toAbsolutePath().normalize();
     }
 
     private static boolean commandSucceeds(String command, String argument) {
@@ -237,6 +250,7 @@ class ApiFabricOpenCodeE2eTest {
         ApiFabricTools apiFabricTools() {
             return new ApiFabricTools();
         }
+
     }
 
     static class ApiFabricTools {
@@ -250,8 +264,14 @@ class ApiFabricOpenCodeE2eTest {
             throw new IllegalStateException("Remote proxy method must not execute");
         }
 
-        @Tool(name = "upload_table", description = "Upload a table DSL")
+        @Tool(name = "upload_table", description = "Upload a table DSL",
+                allowedCallers = {Tool.Caller.AGENT, Tool.Caller.SCRIPT})
         String uploadTable(String filePath, String description) {
+            throw new IllegalStateException("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "validate_table", description = "Validate a table", allowedCallers = Tool.Caller.SCRIPT)
+        String validateTable(String catalog) {
             throw new IllegalStateException("Remote proxy method must not execute");
         }
     }

@@ -1,61 +1,66 @@
 {
   "groups": [
     {
-      "name": "opencode.mcp",
+      "name": "dataagent.mcp",
       "type": "ai.opencode.mcp.autoconfigure.McpFabricProperties",
       "sourceType": "ai.opencode.mcp.autoconfigure.McpFabricProperties"
     }
   ],
   "properties": [
     {
-      "name": "opencode.mcp.enabled",
+      "name": "dataagent.mcp.enabled",
       "type": "java.lang.Boolean",
       "defaultValue": true
     },
     {
-      "name": "opencode.mcp.endpoint",
+      "name": "dataagent.mcp.endpoint",
       "type": "java.lang.String",
       "defaultValue": "/rest/mcp"
     },
     {
-      "name": "opencode.mcp.server-name",
+      "name": "dataagent.mcp.script-endpoint",
+      "type": "java.lang.String",
+      "defaultValue": "/rest/mcp/script"
+    },
+    {
+      "name": "dataagent.mcp.server-name",
       "type": "java.lang.String",
       "defaultValue": "dataagent-mcp"
     },
     {
-      "name": "opencode.mcp.server-version",
+      "name": "dataagent.mcp.server-version",
       "type": "java.lang.String",
       "defaultValue": "0.1.0"
     },
     {
-      "name": "opencode.mcp.request-timeout",
+      "name": "dataagent.mcp.request-timeout",
       "type": "java.time.Duration",
       "defaultValue": "5m"
     },
     {
-      "name": "opencode.mcp.keep-alive",
+      "name": "dataagent.mcp.keep-alive",
       "type": "java.time.Duration"
     },
     {
-      "name": "opencode.mcp.max-request-size",
+      "name": "dataagent.mcp.max-request-size",
       "type": "org.springframework.util.unit.DataSize",
       "defaultValue": "16MB"
     },
     {
-      "name": "opencode.mcp.max-upload-file-size",
+      "name": "dataagent.mcp.max-upload-file-size",
       "type": "org.springframework.util.unit.DataSize",
       "defaultValue": "100MB"
     },
     {
-      "name": "opencode.mcp.api-fabric.base-url",
+      "name": "dataagent.mcp.api-fabric.base-url",
       "type": "java.lang.String"
     },
     {
-      "name": "opencode.mcp.api-fabric.endpoints",
+      "name": "dataagent.mcp.api-fabric.endpoints",
       "type": "java.util.Map<java.lang.String,ai.opencode.mcp.autoconfigure.McpFabricProperties$ApiFabricEndpoint>"
     },
     {
-      "name": "opencode.mcp.cse.endpoints",
+      "name": "dataagent.mcp.cse.endpoints",
       "type": "java.util.Map<java.lang.String,ai.opencode.mcp.autoconfigure.McpFabricProperties$CseEndpoint>"
     }
   ]

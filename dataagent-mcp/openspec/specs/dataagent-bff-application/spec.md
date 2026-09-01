@@ -65,13 +65,13 @@ BFF SHALL 声明至少一个 multipart API Fabric 远程工具示例，工具对
 - **AND** 错误信息包含可定位的工具和文件参数信息
 
 ### Requirement: BFF 配置可外部化
-BFF SHALL 将 MCP 服务、API Fabric 基础地址和示例远程端点路径集中保存在独立的 `mcp-config.yml` 中，`application.yml` SHALL NOT 直接声明 `opencode.mcp` 配置，仓库 SHALL NOT 包含真实环境凭据、令牌或公司环境专用地址。
+BFF SHALL 将 MCP 服务、API Fabric 基础地址和示例远程端点路径集中保存在独立的 `mcp-config.yml` 中，配置树 SHALL 使用框架中立的 `dataagent.mcp` 命名空间，`application.yml` SHALL NOT 直接声明 MCP 配置，仓库 SHALL NOT 包含真实环境凭据、令牌或公司环境专用地址。
 
 #### Scenario: 应用导入独立 MCP 配置
 - **WHEN** BFF 使用默认 classpath 配置启动
 - **THEN** `application.yml` 显式导入 `mcp-config.yml`
 - **AND** MCP 服务与远程工具配置由独立文件完成绑定
-- **AND** `application.yml` 不包含 `opencode.mcp` 配置树
+- **AND** `application.yml` 不包含 MCP 配置树
 
 #### Scenario: 本地覆盖远程地址
 - **WHEN** 开发者通过环境变量或 Spring 配置覆盖 API Fabric 基础地址

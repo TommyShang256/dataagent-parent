@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Set;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.annotation.ToolParam;
@@ -42,6 +43,8 @@ class ApiFabricToolsTest {
                 "uploadTable", String.class, String.class, String.class);
 
         assertThat(method.getAnnotation(Tool.class).name()).isEqualTo("upload_table");
+        assertThat(Set.of(method.getAnnotation(Tool.class).allowedCallers()))
+                .containsExactlyInAnyOrder(Tool.Caller.AGENT, Tool.Caller.SCRIPT);
         assertThat(Arrays.stream(method.getParameterTypes())).containsOnly(String.class);
         assertThat(Arrays.stream(method.getParameters()).map(parameter -> parameter.getName()).toList())
                 .containsExactly("filePath", "catalog", "description");
@@ -57,6 +60,17 @@ class ApiFabricToolsTest {
         assertThatThrownBy(() -> tools.uploadTable("/tmp/table.dsl", "demo", "description"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Remote proxy method must not execute: upload_table");
+        assertThatThrownBy(() -> tools.validateTable("demo"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Remote proxy method must not execute: validate_table");
+    }
+
+    @Test
+    @DisplayName("校验工具仅允许 Script 调用")
+    void validateToolAllowsOnlyScriptCaller() throws Exception {
+        Method method = ApiFabricTools.class.getDeclaredMethod("validateTable", String.class);
+        assertThat(method.getAnnotation(Tool.class).allowedCallers())
+                .containsExactly(Tool.Caller.SCRIPT);
     }
 
     @Test

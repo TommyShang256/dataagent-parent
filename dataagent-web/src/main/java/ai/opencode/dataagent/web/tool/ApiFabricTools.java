@@ -36,12 +36,24 @@ public class ApiFabricTools {
     @Tool(
             name = "upload_table",
             title = "Upload table definition",
-            description = "Upload a table DSL file and regular parameters through API Fabric")
+            description = "Upload a table DSL file and regular parameters through API Fabric",
+            allowedCallers = {Tool.Caller.AGENT, Tool.Caller.SCRIPT})
     String uploadTable(
             @ToolParam(description = "Local path of the file to upload") String filePath,
             @ToolParam(description = "Catalog value sent as a regular request parameter") String catalog,
             @ToolParam(description = "Description sent as a text request part", required = false) String description) {
         throw remoteOnly("upload_table");
+    }
+
+    @Tool(
+            name = "validate_table",
+            title = "Validate table catalog",
+            description = "Validate a table catalog through API Fabric",
+            allowedCallers = Tool.Caller.SCRIPT,
+            readOnly = true)
+    String validateTable(
+            @ToolParam(description = "Catalog to validate") String catalog) {
+        throw remoteOnly("validate_table");
     }
 
     private static IllegalStateException remoteOnly(String toolName) {

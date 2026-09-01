@@ -75,7 +75,7 @@ class LoggingLanguageTest {
                     ToolAuditEvent.Outcome.SUCCESS,
                     new ToolAuditEvent.Target("echo", Tool.Type.LOCAL),
                     new ToolAuditEvent.Details(
-                            Duration.ZERO, Map.of("message", "hello"), "hello", null));
+                            Duration.ZERO, Map.of("message", "hello"), "hello", null, null));
             new Slf4jToolAuditLogger().record(event);
 
             assertThat(appender.list).singleElement()

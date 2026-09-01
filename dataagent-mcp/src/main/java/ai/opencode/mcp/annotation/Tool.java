@@ -18,6 +18,21 @@ import java.lang.annotation.Target;
 public @interface Tool {
 
     /**
+     * 工具调用者类别。
+     */
+    enum Caller {
+        /**
+         * 由 Agent 原生工具调用或公共 CodeMode 发起的调用。
+         */
+        AGENT,
+
+        /**
+         * 由服务端 Script MCP 入口接收的调用。
+         */
+        SCRIPT
+    }
+
+    /**
      * 工具在启动绑定完成后的执行类别。
      */
     enum Type {
@@ -62,6 +77,13 @@ public @interface Tool {
      * @return 工具功能说明，空字符串表示未设置
      */
     String description() default "";
+
+    /**
+     * 获取允许调用当前工具的调用者类别。
+     *
+     * @return 允许调用者；默认仅允许 Agent
+     */
+    Caller[] allowedCallers() default {Caller.AGENT};
 
     /**
      * 判断工具是否只读。

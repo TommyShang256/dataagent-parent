@@ -32,4 +32,20 @@ public interface ToolInvoker {
     default Object invoke(Map<String, Object> arguments, Map<String, List<String>> headers) throws Exception {
         return invoke(arguments);
     }
+
+    /**
+     * 使用业务参数、传输 Header 与独立调用来源调用工具。
+     *
+     * @param arguments 工具参数映射
+     * @param headers 当前请求的不可变多值 Header
+     * @param source 不进入业务参数的调用来源
+     * @return 工具执行结果
+     * @throws Exception 工具执行失败时抛出
+     */
+    default Object invoke(
+            Map<String, Object> arguments,
+            Map<String, List<String>> headers,
+            ToolCallSource source) throws Exception {
+        return invoke(arguments, headers);
+    }
 }

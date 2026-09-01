@@ -148,16 +148,17 @@ public final class McpToolScanner {
         String name = annotation.name().isBlank() ? method.getName() : annotation.name();
         String title = annotation.title().isBlank() ? null : annotation.title();
         String description = annotation.description().isBlank() ? null : annotation.description();
-    return new ToolRegistration(
-        name,
-        new ToolRegistration.Definition(title, description, schemaGenerator.forMethod(method)),
-        arguments -> invoke(target, invocable, method.getParameters(), arguments),
-        Tool.Type.LOCAL,
-        new ToolRegistration.Behavior(
-            annotation.readOnly(),
-            annotation.destructive(),
-            annotation.idempotent(),
-            annotation.openWorld()));
+        return new ToolRegistration(
+                name,
+                new ToolRegistration.Definition(title, description, schemaGenerator.forMethod(method)),
+                arguments -> invoke(target, invocable, method.getParameters(), arguments),
+                Tool.Type.LOCAL,
+                new ToolRegistration.Behavior(
+                        annotation.readOnly(),
+                        annotation.destructive(),
+                        annotation.idempotent(),
+                        annotation.openWorld(),
+                        Set.of(annotation.allowedCallers())));
     }
 
     private Object invoke(Object target, Method method, Parameter[] parameters, Map<String, Object> arguments)

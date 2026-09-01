@@ -16,7 +16,7 @@ import org.springframework.util.unit.DataSize;
  * @author beining.shang
  * @since 2026-08-31
  */
-@ConfigurationProperties("opencode.mcp")
+@ConfigurationProperties("dataagent.mcp")
 @Getter
 @Setter
 public class McpFabricProperties {
@@ -50,6 +50,21 @@ public class McpFabricProperties {
      * 返回值：无。
      */
     private String endpoint = "/rest/mcp";
+
+    /**
+     * Script MCP HTTP 端点路径。
+     * <p>
+     * -- GETTER --
+     * 获取 Script MCP HTTP 端点路径。
+     *
+     * @return Script MCP HTTP 端点路径
+     * <p>
+     * -- SETTER --
+     * 设置 Script MCP HTTP 端点路径。
+     * @param scriptEndpoint Script MCP HTTP 端点路径
+     * 返回值：无。
+     */
+    private String scriptEndpoint = "/rest/mcp/script";
 
     /**
      * MCP Server 名称。

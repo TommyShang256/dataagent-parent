@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.api.ToolInvoker;
+import ai.opencode.mcp.api.ToolCallSource;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.audit.ToolAuditEvent;
 import ai.opencode.mcp.audit.ToolAuditLogger;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.DisplayName;
@@ -74,6 +76,28 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("按调用者把工具发布到隔离的服务端目录")
+    void publishesToolsToCallerSpecificCatalogs() {
+        FakeToolServer agentServer = new FakeToolServer();
+        FakeToolServer scriptServer = new FakeToolServer();
+        List<ToolRegistration> registrations = List.of(
+                registration("agent", arguments -> "agent", Set.of(Tool.Caller.AGENT)),
+                registration("script", arguments -> "script", Set.of(Tool.Caller.SCRIPT)),
+                registration("shared", arguments -> "shared", Set.of(Tool.Caller.AGENT, Tool.Caller.SCRIPT)));
+        McpToolRegistry registry = new McpToolRegistry(
+                () -> registrations,
+                new ObjectMapper().findAndRegisterModules(),
+                Map.of(Tool.Caller.AGENT, agentServer, Tool.Caller.SCRIPT, scriptServer),
+                event -> {
+                });
+
+        registry.afterSingletonsInstantiated();
+
+        assertThat(agentServer.added).containsExactly("agent", "shared");
+        assertThat(scriptServer.added).containsExactly("script", "shared");
+    }
+
+    @Test
     @DisplayName("审计失败不改变注册与业务结果")
     void auditFailuresDoNotChangeRegistrationOrBusinessOutcome() throws Exception {
         var success = registration("success", arguments -> "ok");
@@ -119,6 +143,9 @@ class McpToolRegistryTest {
         assertText(registry.call(registration("object", arguments -> Map.of("value", 3)), Map.of()),
                 "{\"value\":3}", false);
         assertText(registry.call(registration("null", arguments -> null), Map.of()), "null", false);
+        assertText(registry.call(
+                registration("null-arguments", arguments -> arguments.isEmpty() ? "empty" : "unexpected"),
+                null, Map.of(), Map.of()), "empty", false);
 
         var nativeResult = McpSchema.CallToolResult.builder()
                 .content(List.of(McpSchema.TextContent.builder("native").build())).isError(false).build();
@@ -143,7 +170,8 @@ class McpToolRegistryTest {
                         "回显", null, Map.of("type", "object", "additionalProperties", false)),
                 arguments -> arguments.get("message"),
                 Tool.Type.LOCAL,
-                new ToolRegistration.Behavior(true, false, true, false));
+                new ToolRegistration.Behavior(
+                        true, false, true, false, Set.of(Tool.Caller.AGENT)));
         McpServerFeatures.SyncToolSpecification specification = registry.toSpecification(registration);
         McpSchema.CallToolResult result = specification.callHandler().apply(
                 null, McpSchema.CallToolRequest.builder("echo")
@@ -156,6 +184,8 @@ class McpToolRegistryTest {
         assertThat(specification.tool().annotations().destructiveHint()).isFalse();
         assertThat(specification.tool().annotations().idempotentHint()).isTrue();
         assertThat(specification.tool().annotations().openWorldHint()).isFalse();
+        assertThat(specification.tool().meta()).containsEntry(
+                ToolCallSource.ALLOWED_CALLERS_META_KEY, List.of("agent"));
         assertText(result, "through-handler", false);
     }
 
@@ -226,24 +256,76 @@ class McpToolRegistryTest {
         assertThat(received.get()).containsEntry("Authorization", List.of("second"));
     }
 
+    @Test
+    @DisplayName("按工具调用者策略拒绝 Agent 与 Script 越权调用")
+    void enforcesCallerPolicy() {
+        ToolRegistration agentOnly = registration(
+                "agent", arguments -> "agent", Set.of(Tool.Caller.AGENT));
+        ToolRegistration scriptOnly = registration(
+                "script", arguments -> "script", Set.of(Tool.Caller.SCRIPT));
+        Map<String, Object> scriptMeta = scriptMeta();
+
+        McpToolRegistry registry = registry(List.of(), new FakeToolServer(), event -> {
+        });
+        assertText(registry.call(agentOnly, Map.of(), scriptMeta, Map.of(), Tool.Caller.SCRIPT), "not allowed", true);
+        assertText(registry.call(scriptOnly, Map.of(), scriptMeta, Map.of(), Tool.Caller.SCRIPT), "script", false);
+        assertText(registry.call(scriptOnly, Map.of()), "not allowed", true);
+    }
+
+    @Test
+    @DisplayName("调用者元数据不进入业务参数并写入审计来源")
+    void keepsCallerMetadataOutsideArgumentsAndAuditsSource() {
+        List<ToolAuditEvent> events = new ArrayList<>();
+        ToolRegistration shared = registration(
+                "shared", arguments -> arguments, Set.of(Tool.Caller.AGENT, Tool.Caller.SCRIPT));
+        McpToolRegistry registry = registry(List.of(shared), new FakeToolServer(), events::add);
+        registry.afterSingletonsInstantiated();
+        Map<String, Object> meta = scriptMeta();
+
+        McpSchema.CallToolResult result = registry.call(
+                find(registry, "shared"), Map.of("value", 1), meta, Map.of(), Tool.Caller.SCRIPT);
+
+        assertText(result, "value", false);
+        ToolAuditEvent invocation = events.getLast();
+        assertThat(invocation.arguments()).containsOnlyKeys("value");
+        assertThat(invocation.source().caller()).isEqualTo(Tool.Caller.SCRIPT);
+        assertThat(invocation.source().skillId()).isEqualTo("skill-1");
+    }
+
     private static McpToolRegistry registry(
             List<ToolRegistration> registrations, FakeToolServer server, ToolAuditLogger auditLogger) {
         return new McpToolRegistry(
-                () -> registrations, new ObjectMapper().findAndRegisterModules(), server, auditLogger);
+                () -> registrations,
+                new ObjectMapper().findAndRegisterModules(),
+                Map.of(Tool.Caller.AGENT, server, Tool.Caller.SCRIPT, server),
+                auditLogger);
     }
 
     private static ToolRegistration find(McpToolRegistry registry, String name) {
         return registry.tools().stream().filter(tool -> tool.name().equals(name)).findFirst().orElseThrow();
     }
 
+    private static Map<String, Object> scriptMeta() {
+        return Map.of(
+                ToolCallSource.SKILL_ID_META_KEY, "skill-1",
+                ToolCallSource.SCRIPT_ID_META_KEY, "script-1",
+                ToolCallSource.PARENT_CALL_ID_META_KEY, "parent-1",
+                ToolCallSource.TRACE_ID_META_KEY, "trace-1");
+    }
+
     private static ToolRegistration registration(String name, ToolInvoker invoker) {
+        return registration(name, invoker, Set.of(Tool.Caller.AGENT));
+    }
+
+    private static ToolRegistration registration(
+            String name, ToolInvoker invoker, Set<Tool.Caller> allowedCallers) {
         return new ToolRegistration(
                 name,
                 new ToolRegistration.Definition(
                         null, null, Map.of("type", "object", "additionalProperties", false)),
                 invoker,
                 Tool.Type.LOCAL,
-                new ToolRegistration.Behavior(false, true, false, true));
+                new ToolRegistration.Behavior(false, true, false, true, allowedCallers));
     }
 
     private static void assertText(McpSchema.CallToolResult result, String text, boolean error) {
