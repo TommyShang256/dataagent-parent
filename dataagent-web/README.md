@@ -28,6 +28,12 @@ DATAAGENT_UPLOAD_TABLE_PATH=/tables \
 
 仓库不保存真实环境地址、令牌或凭据。认证信息应由部署环境提供，并通过 MCP 入站 Header 透传机制传递允许的 Header。
 
+## 配置文件边界
+
+`application.yml` 只保存 BFF 应用名称并通过 `spring.config.import` 导入 MCP 配置。MCP 服务元数据、API Fabric 基础地址和工具端点映射统一保存在 `mcp-config.yml`，不直接放入 `application.yml`。
+
+两个文件都进入同一个 Spring Environment，因此环境变量、命令行参数和部署平台配置仍可覆盖 `mcp-config.yml` 中的本地默认值。
+
 ## MCP Client 配置
 
 OpenCode 等支持 streamable HTTP 的 MCP Client 可配置为：

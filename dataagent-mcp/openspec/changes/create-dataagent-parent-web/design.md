@@ -48,6 +48,10 @@ JSON 示例覆盖 Path、Query、业务 Header 与 Body。Header/Body 同名参�
 
 API Fabric 基础地址属于发布工具目录的必要条件：缺失或非法时由现有 starter 启动期校验失败。示例端点 ref 保持相对路径，使同一构件可指向不同环境。
 
+MCP 配置独立存放于 classpath 根目录的 `mcp-config.yml`，包含 `opencode.mcp` 服务元数据、API Fabric 基础地址和远程端点映射。`application.yml` 仅保留应用自身配置，并通过 `spring.config.import=classpath:mcp-config.yml` 显式导入 MCP 配置。该边界让 BFF 的通用 Spring Boot 配置与 MCP 工具配置可以分别维护，同时继续使用 Spring Environment，因此环境变量、命令行参数和部署平台配置仍可按既有优先级覆盖文件默认值。
+
+备选方案是使用 `spring.config.additional-location` 要求启动命令额外指定文件，但这会令默认启动方式无法自动获得必要的 MCP 配置，因此不采用。
+
 ### 5. 测试分层与覆盖率
 
 BFF 单元测试验证工具注解、配置绑定和参数 Schema；集成测试以真实 MCP HTTP 请求驱动 BFF，再由本地模拟服务捕获 API Fabric 请求，从而验证客户端可观察的完整链路。所有测试使用中文 `@DisplayName`，并复用或扩展现有命名策略测试。

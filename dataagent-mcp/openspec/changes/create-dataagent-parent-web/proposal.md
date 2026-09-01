@@ -9,6 +9,7 @@
 - 将 `dataagent-mcp` 调整为继承 DataAgent 父 POM，同时保持其 starter 构件坐标和公共能力。
 - 新建与 MCP 同级的 `dataagent-web` Spring Boot BFF 模块，并显式依赖 `dataagent-mcp`。
 - 在 BFF 中配置 MCP HTTP 服务及 API Fabric 远程工具示例，包括普通参数、业务 Header、JSON Body、文件与普通 `RequestParam`/`RequestPart` 组合上传场景。
+- 将 BFF 的全部 MCP 配置集中到独立 `mcp-config.yml`，`application.yml` 只负责应用基础配置和显式导入，避免业务应用配置与 MCP 工具目录混放。
 - 增加 BFF 启动、工具发现、参数 Schema 和远程调用绑定测试，以及父工程统一构建与 JavaDoc 验证记录。
 
 ## Capabilities

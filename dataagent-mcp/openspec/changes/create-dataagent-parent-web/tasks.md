@@ -17,6 +17,7 @@
 - [x] 3.3 声明 API Fabric JSON 示例工具，覆盖 Path、Query、业务 Header、展开 Body 及 Header/Body 同名参数，执行工具扫描和 Schema 测试验证工具目录与位置化输入键。
 - [x] 3.4 声明 API Fabric multipart 示例工具，覆盖 `filePath` 文件 part、普通 `RequestParam` 和非文件 `RequestPart`，执行工具扫描和 Schema 测试验证文件只暴露字符串路径且普通参数均可输入。
 - [x] 3.5 为 BFF 新增中文 README，说明启动命令、环境变量、MCP 端点、示例 `tools/list`/`tools/call` 请求、文件路径边界及远程接口映射，并通过人工核对和文档命令复制执行验证示例完整。
+- [x] 3.6 将全部 `opencode.mcp` 配置迁移到独立 `mcp-config.yml`，令 `application.yml` 只显式导入该文件并保留应用基础配置，增加配置边界测试并执行 Web 模块验证。
 
 ## 4. MCP 到 API Fabric 集成测试
 

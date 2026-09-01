@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mockStatic;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
 import ai.opencode.dataagent.web.tool.ApiFabricTools;
 import ai.opencode.mcp.autoconfigure.McpFabricProperties;
 import io.modelcontextprotocol.server.McpSyncServer;
@@ -15,6 +18,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.context.WebServerApplicationContext;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.context.ConfigurableApplicationContext;
 
 /**
@@ -46,6 +50,23 @@ class DataAgentWebApplicationTest {
             assertThat(context.getBean(McpSyncServer.class)).isNotNull();
             assertThat(((WebServerApplicationContext) context).getWebServer().getPort()).isPositive();
         }
+    }
+
+    @Test
+    @DisplayName("应用配置只导入独立 MCP 配置文件")
+    void applicationConfigOnlyImportsMcpConfig() throws IOException {
+        String applicationConfig = new ClassPathResource("application.yml")
+                .getContentAsString(StandardCharsets.UTF_8);
+        String mcpConfig = new ClassPathResource("mcp-config.yml")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(applicationConfig)
+                .contains("import: classpath:mcp-config.yml")
+                .doesNotContain("opencode:");
+        assertThat(mcpConfig)
+                .contains("opencode:")
+                .contains("mcp:")
+                .contains("api-fabric:");
     }
 
     @Test

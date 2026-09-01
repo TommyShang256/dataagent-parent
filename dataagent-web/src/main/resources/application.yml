@@ -1,25 +1,5 @@
 spring:
   application:
     name: dataagent-web
-
-opencode:
-  mcp:
-    endpoint: /rest/mcp
-    server-name: dataagent-web
-    server-version: 0.1.0
-    api-fabric:
-      base-url: ${DATAAGENT_API_FABRIC_BASE_URL:http://127.0.0.1:18080/api}
-      endpoints:
-        create_order:
-          method: POST
-          path-template: "${DATAAGENT_CREATE_ORDER_PATH:/orders/{orderId}}"
-          query:
-            verbose: verbose
-          headers:
-            business:
-              A: headerA
-        upload_table:
-          method: POST
-          path-template: "${DATAAGENT_UPLOAD_TABLE_PATH:/tables}"
-          files:
-            dsl: filePath
+  config:
+    import: classpath:mcp-config.yml

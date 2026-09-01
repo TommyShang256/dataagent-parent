@@ -54,6 +54,14 @@ DataAgent Web    [jar]
 - `create_order`：POST JSON 请求，覆盖 Path、Query、业务 Header、展开 Body，并验证下游 Header `A` 与 Body 字段 `A` 使用独立 MCP 输入值；
 - `upload_table`：POST multipart 请求，`filePath` 映射文件 part `dsl`，同时发送普通 `catalog` 和文本 `description` part。
 
+MCP 配置已从应用主配置中独立抽取：
+
+- `application.yml` 只包含应用名称和 `spring.config.import=classpath:mcp-config.yml`；
+- `mcp-config.yml` 集中包含 MCP 服务元数据、API Fabric 基础地址和两个远程工具端点映射；
+- 配置边界测试读取两个 classpath 资源，断言 `application.yml` 不包含 `opencode` 配置树；
+- 上下文启动和真实 MCP 集成测试确认独立文件能自动导入，命令行覆盖 `base-url` 的能力不变；
+- Web 可执行 JAR 的 `BOOT-INF/classes/` 同时包含 `application.yml` 与 `mcp-config.yml`。
+
 `DataAgentMcpIntegrationTest` 使用官方 MCP Java Client 的 streamable HTTP transport 连接随机端口 `/rest/mcp`，真实执行初始化、`tools/list` 和 `tools/call`。本地 JDK `HttpServer` 捕获 API Fabric 请求，验证结果如下：
 
 - MCP Server 信息为 `dataagent-web:0.1.0`；
@@ -66,7 +74,7 @@ DataAgent Web    [jar]
 Web 模块测试结果：
 
 ```text
-Tests run: 11, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 12, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -98,7 +106,7 @@ mvn javadoc:aggregate
 BUILD SUCCESS
 ```
 
-MCP 共运行 78 个测试，0 失败、0 错误、1 个环境条件跳过；Web 共运行 11 个测试，0 失败、0 错误、0 跳过。聚合 JavaDoc 成功，保留 MCP 既有的 10 个默认构造器警告，未引入新的 Web JavaDoc 警告。
+MCP 共运行 78 个测试，0 失败、0 错误、1 个环境条件跳过；Web 共运行 12 个测试，0 失败、0 错误、0 跳过。聚合 JavaDoc 成功，保留 MCP 既有的 10 个默认构造器警告，未引入新的 Web JavaDoc 警告。
 
 执行 `mvn -DskipTests install` 后，外部消费者 `/Users/tommy/projects/dataagent-mcp-test` 验证结果：
 
@@ -119,12 +127,35 @@ BUILD SUCCESS
 - Web 生产源码：2 个；生产 class：3 个。
 - MCP JAR 不包含测试类或 `target/test-classes`。
 - Web 可执行 JAR 包含 `DataAgentWebApplication`、`ApiFabricTools` 及内嵌 `dataagent-mcp-0.1.0-SNAPSHOT.jar`。
+- Web 可执行 JAR 的 `BOOT-INF/classes/application.yml` 只导入 `mcp-config.yml`，后者包含全部 `opencode.mcp` 配置。
 - `javap -p` 确认 MCP 关键类型 `RemoteToolInvokerBinder`、`ApiFabricToolEndpointHandler`、`CseToolEndpointHandler` 的签名没有非预期变化。
 - `javap -p` 确认 Web 仅包含启动入口、两个远程工具方法和响应 record，没有额外业务转发层。
 - 旧绝对路径只保留在迁移提案、回滚方案、基线记录和历史 JVM 崩溃快照中；有效源码与构建配置均使用新目录或正确相对路径。
 - 配置中只包含本地回环占位地址，不包含令牌、密码、API Key 或真实公司环境地址。
 
 ## 最终质量门禁
+
+### MCP 文件上传新一轮端到端复验
+
+配置拆分到 `mcp-config.yml` 后，于 2026-09-01 15:12 CST 单独执行真实 MCP 链路测试：
+
+```text
+mvn -pl dataagent-web -am -Dtest=DataAgentMcpIntegrationTest \
+  -Dsurefire.failIfNoSpecifiedTests=false clean test
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+本轮测试使用官方 MCP Java Client 连接随机端口 BFF，并由本地 `HttpServer` 模拟 API Fabric，重新确认：
+
+- 标准 MCP `initialize` 成功，`tools/list` 返回 `create_order` 与 `upload_table`；
+- `tools/call(upload_table)` 读取临时 DSL 文件并成功返回 `uploaded`；
+- 下游请求为 `multipart/form-data`，文件 part `dsl` 保留文件名和文件内容；
+- 普通 `RequestParam` 字段 `catalog=analytics` 与文本 `RequestPart` 字段 `description=integration upload` 同时存在；
+- 不存在的文件返回失败，模拟 API Fabric 的调用次数保持为零；
+- JSON 工具调用和 Header/Body 同名参数隔离继续通过。
+
+随后再次执行父工程 `mvn clean verify`，MCP 78 个测试保持 0 失败、0 错误、1 个环境条件跳过，Web 12 个测试全部通过，两个模块的 JaCoCo 门禁均通过，最终 reactor `BUILD SUCCESS`。
 
 ```text
 openspec validate create-dataagent-parent-web --strict
