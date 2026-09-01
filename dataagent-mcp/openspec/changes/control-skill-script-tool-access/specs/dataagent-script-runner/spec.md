@@ -69,10 +69,11 @@ Runner SHALL 在单次进程中 initialize、查询目录、可选调用、关�
 - **THEN** Runner 关闭临时 MCP Client
 - **AND** 标准输出只包含成功获得的 MCP JSON 结果，诊断只写入标准错误
 
-### Requirement: Runner 必须提供可归档分发包和中文手册
+### Requirement: Runner 必须保持单文件 Python 交付
 
-构建 SHALL 生成只包含单文件 `bin/dataagent-runner` 与中文 README 的 ZIP 和 TAR.GZ 分发包。Runner SHALL 仅依赖 Linux Shell、sed 和 Python 3 标准库，MUST NOT 依赖 jq、curl、pip、JAR 或第三方 Python 包。
+仓库 SHALL 只在 `dataagent-runner/bin/dataagent-runner` 保留一个带 Python shebang 且具备执行权限的 Runner 文件。Runner SHALL 仅依赖 Python 3 标准库，MUST NOT 依赖 Shell 包装、sed、jq、curl、pip、JAR 或第三方 Python 包；父工程 MUST NOT 将 Runner 声明为 Maven 模块或生成 Runner ZIP/TAR 分发包。
 
-#### Scenario: 服务器安装
-- **WHEN** 运维解压分发包并把 `bin` 加入 PATH
-- **THEN** Script 可以从任意工作目录直接执行 `dataagent-runner`
+#### Scenario: 直接执行 Runner
+- **WHEN** 运行环境的 PATH 中存在 Python 3，且用户直接执行 `dataagent-runner/bin/dataagent-runner`
+- **THEN** 操作系统根据 Python shebang 启动 Runner
+- **AND** 不经过 Shell 解释或 Maven 归档解压步骤

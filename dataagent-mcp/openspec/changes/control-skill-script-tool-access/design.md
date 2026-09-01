@@ -24,7 +24,9 @@ DataAgent BFF 当前使用官方 MCP Java SDK，通过一个固定 Streamable HT
 
 ### 0. Script Runner 部署与职责
 
-父工程新增 `dataagent-runner` 模块。构建产物只包含单文件 `bin/dataagent-runner` 和中文使用手册，解压后只需把 `bin` 加入 `PATH`。Runner 使用 Linux Shell 启动内嵌的 Python 标准库实现，不依赖 jq、curl、pip、JAR 或第三方 Python 包；它是一次性标准 MCP Client，不依赖 Opencode MCP 配置，也不保存 Session、目录、Skill ID、Script ID 或调用历史。
+Runner 不作为 Maven 模块参与父工程构建，`dataagent-runner` 目录只保留 `bin/dataagent-runner`。文件使用 `#!/usr/bin/env python3` shebang 直接交给 PATH 中的 Python 3 解释器执行，不再通过 Shell、sed 或 `python3 -c` 提取内嵌代码，也不生成 ZIP/TAR 分发包。这样保持单文件交付，同时让入口语言、静态检查和运行行为一致。
+
+Runner 仅使用 Python 3 标准库，不依赖 jq、curl、pip、JAR 或第三方 Python 包；它是一次性标准 MCP Client，不依赖 Opencode MCP 配置，也不保存 Session、目录、Skill ID、Script ID 或调用历史。仓库不再保留 Runner 独立 README 和独立测试目录，入口说明集中到父工程 README，真实 BFF/API Fabric 回归由 `dataagent-web` 集成测试直接执行该文件。
 
 Runner 从 `POD_IP` 与 `POD_PORT` 构造 `http://${POD_IP}:${POD_PORT}/rest/mcp/script`。地址不允许通过 CLI 覆盖，也不回退到 localhost；Opencode 的 4096 端口不参与 Runner 到 BFF 的通信。BFF 需要监听 `0.0.0.0`。
 
@@ -95,5 +97,6 @@ starter 与 BFF 统一使用 `dataagent.mcp` 作为 Spring 配置命名空间，
 5. 使用两个官方 MCP Client 完成 Agent、Script、共享 Tool 与越权目录回归。
 6. 精确撤销 Opencode 仓库中本需求产生的全部改动。
 7. 将 starter、BFF、测试和文档中的配置命名空间统一迁移到 `dataagent.mcp`。
+8. 将 Runner 收敛为独立 Python 可执行文件，移除 Maven 模块、归档分发和 Shell 包装，并由 Web 集成测试直接执行。
 
 回滚时停止并移除 Script endpoint 配置，再删除 Tool 的 `SCRIPT` 允许项；Agent endpoint 与默认 Agent-only Tool 不受影响。

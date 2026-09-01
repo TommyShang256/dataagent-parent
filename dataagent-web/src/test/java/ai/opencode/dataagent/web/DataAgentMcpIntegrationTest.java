@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,10 @@ import org.springframework.context.ConfigurableApplicationContext;
 class DataAgentMcpIntegrationTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    private static final Path RUNNER = Path.of("..", "dataagent-runner", "bin", "dataagent-runner")
+            .toAbsolutePath()
+            .normalize();
 
     @TempDir
     Path temporaryDirectory;
@@ -225,28 +230,42 @@ class DataAgentMcpIntegrationTest {
     }
 
     @Test
-    @DisplayName("Shell Runner 通过标准 MCP 流程调用 BFF 的 Script-only 工具")
-    void shellRunnerCallsScriptToolEndToEnd() throws Exception {
-        Path runner = Path.of("..", "dataagent-runner", "bin", "dataagent-runner")
-                .toAbsolutePath()
-                .normalize();
-        assertThat(runner).isRegularFile();
+    @DisplayName("Python Runner 支持基础 CLI 并在连接前拒绝无效输入")
+    void pythonRunnerSupportsCliAndRejectsInvalidInput() throws Exception {
+        RunnerResult version = runRunner(false, "--version");
+        RunnerResult help = runRunner(false, "--help");
+        RunnerResult missingEnvironment = runRunner(false, "--list");
+        RunnerResult invalidArguments = runRunner(false, "validate_table", "[]");
 
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                "/bin/sh",
-                runner.toString(),
-                "validate_table",
-                "{\"catalog\":\"runner\"}");
-        processBuilder.environment().put("POD_IP", "127.0.0.1");
-        processBuilder.environment().put("POD_PORT", Integer.toString(bffPort));
-        Process process = processBuilder.start();
-        String standardOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String standardError = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-        int exitCode = process.waitFor();
+        assertThat(version.exitCode()).as(version.standardError()).isZero();
+        assertThat(version.standardOutput()).contains("0.1.0-SNAPSHOT");
+        assertThat(help.exitCode()).as(help.standardError()).isZero();
+        assertThat(help.standardOutput()).contains("dataagent-runner --list");
+        assertThat(missingEnvironment.exitCode()).isEqualTo(3);
+        assertThat(missingEnvironment.standardError()).contains("POD_IP must be configured");
+        assertThat(invalidArguments.exitCode()).isEqualTo(2);
+        assertThat(invalidArguments.standardError()).contains("Tool arguments must be a JSON object");
+    }
 
-        assertThat(exitCode).as(standardError).isZero();
-        assertThat(OBJECT_MAPPER.readTree(standardOutput).path("isError").asBoolean()).isFalse();
-        assertThat(standardOutput).contains("validated");
+    @Test
+    @DisplayName("Python Runner 初始化会话并查询隔离的 Script 工具目录")
+    void pythonRunnerListsScriptTools() throws Exception {
+        RunnerResult result = runRunner(true, "--list");
+
+        assertThat(result.exitCode()).as(result.standardError()).isZero();
+        assertThat(OBJECT_MAPPER.readTree(result.standardOutput()))
+                .extracting(node -> node.path("name").asText())
+                .containsExactly("upload_table", "validate_table");
+    }
+
+    @Test
+    @DisplayName("Python Runner 通过标准 MCP 流程调用 BFF 的 Script-only 工具")
+    void pythonRunnerCallsScriptToolEndToEnd() throws Exception {
+        RunnerResult result = runRunner(true, "validate_table", "{\"catalog\":\"runner\"}");
+
+        assertThat(result.exitCode()).as(result.standardError()).isZero();
+        assertThat(OBJECT_MAPPER.readTree(result.standardOutput()).path("isError").asBoolean()).isFalse();
+        assertThat(result.standardOutput()).contains("validated");
         assertThat(validateCalls).hasValue(1);
     }
 
@@ -266,6 +285,25 @@ class DataAgentMcpIntegrationTest {
 
     private static McpSchema.CallToolRequest scriptRequest(String name, Map<String, Object> arguments) {
         return new McpSchema.CallToolRequest(name, arguments);
+    }
+
+    private RunnerResult runRunner(boolean configureEndpoint, String... arguments) throws Exception {
+        assertThat(RUNNER).isRegularFile().isExecutable();
+        List<String> command = new ArrayList<>();
+        command.add(RUNNER.toString());
+        command.addAll(List.of(arguments));
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        if (configureEndpoint) {
+            processBuilder.environment().put("POD_IP", "127.0.0.1");
+            processBuilder.environment().put("POD_PORT", Integer.toString(bffPort));
+        } else {
+            processBuilder.environment().remove("POD_IP");
+            processBuilder.environment().remove("POD_PORT");
+        }
+        Process process = processBuilder.start();
+        String standardOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        String standardError = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        return new RunnerResult(process.waitFor(), standardOutput, standardError);
     }
 
     private static McpSyncClient client(int port, String endpoint) {
@@ -318,5 +356,8 @@ class DataAgentMcpIntegrationTest {
             String headerA,
             String contentType,
             String body) {
+    }
+
+    private record RunnerResult(int exitCode, String standardOutput, String standardError) {
     }
 }

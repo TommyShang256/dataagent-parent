@@ -33,9 +33,10 @@
 
 ## 6. 无状态 Script Runner
 
-- [x] 6.1 新增独立 `dataagent-runner` 模块，使用 Linux Shell 与 Python 标准库连接固定 Script endpoint
+- [x] 6.1 新增独立单文件 `dataagent-runner/bin/dataagent-runner`，使用 Python shebang 与标准库连接固定 Script endpoint，并验证 `--help` 和 `--version`
 - [x] 6.2 实现 `--list` 全分页目录、工具名精确预检、JSON/stdin 参数、标准结果输出和稳定退出码
 - [x] 6.3 使用 `POD_IP` 与 `POD_PORT` 构造 Pod 内 BFF 地址，拒绝 localhost 回退和 CLI 地址/Header 注入
-- [x] 6.4 构建只包含单文件 `bin` Runner 和 README 的 ZIP/TAR 分发包，不引入 jq、curl、pip 或 JAR
-- [x] 6.5 覆盖 CLI、Pod 地址、分页、Session/协议 Header、SSE、错误路径及真实 BFF/API Fabric 端到端测试
-- [x] 6.6 编写 Runner 中文使用手册并更新父工程入口文档
+- [x] 6.4 删除 Runner Maven 模块、归档配置、独立 README 与测试目录，确认 `dataagent-runner` 下只保留可执行文件
+- [x] 6.5 更新 Web 集成测试以直接执行 Python shebang Runner，并覆盖 CLI、Pod 地址、Session/协议 Header、错误路径及真实 BFF/API Fabric 端到端调用
+- [x] 6.6 更新父工程 README，明确 Runner 是仅依赖 Python 3 标准库的独立单文件客户端
+- [ ] 6.7 重新执行父工程验证、JavaDoc、严格 OpenSpec、JAR 与运行中 BFF 的 Runner 目录检查，并更新中文验证报告
