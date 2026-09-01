@@ -10,6 +10,7 @@
 - Tool 扫描和业务 invoker 只有一份，按 `allowedCallers` 发布到对应目录；
 - caller 只由 endpoint 决定，客户端元数据不参与 caller 判定；
 - Script 不要求 Skill、Script、父调用或 Trace 来源字段，无状态 CLI 可直接发送标准 `tools/call`；
+- Runner 已收敛为带 `#!/usr/bin/env python3` shebang 的单文件 Python 客户端，不再使用 Shell 包装或 Maven 分发模块；
 - starter 与 BFF 配置统一使用 `dataagent.mcp`，不保留 `opencode.mcp` 兼容绑定；
 - `/Users/tommy/projects/opencode` 已恢复到仓库 `HEAD`，工作区完全干净。
 
@@ -55,14 +56,17 @@ Script 请求没有专用 Token、环境变量、私有 Header 或非标准 HTTP
 
 ### 3.3 单文件 Script Runner
 
-`dataagent-runner` 使用 `/bin/sh` 启动内嵌 Python 3 标准库实现，不依赖 jq、curl、pip、JAR 或第三方
-Python 包。自动化验证了以下链路：
+`dataagent-runner/bin/dataagent-runner` 使用 `#!/usr/bin/env python3` 直接调用 PATH 中的 Python 3，
+仅依赖标准库，不经过 Shell、sed 或 `python3 -c`，也不依赖 jq、curl、pip、JAR 或第三方 Python 包。
+`dataagent-web` 集成测试验证了以下链路：
 
-1. `--list` 完成 initialize、initialized notification 和全部 `tools/list` 分页；
-2. MCP Session ID 与协商后的协议版本 Header 会在后续请求中自动携带；
-3. 工具调用前按区分大小写的名称精确预检，不存在的工具不发送 `tools/call`；
-4. JSON 位置参数、stdin、同名 Header/Body Tool 参数、JSON 与 SSE 响应均可正确处理；
-5. Shell Runner 连接真实启动的 BFF Script endpoint，调用 `validate_table` 后 API Fabric mock 收到一次请求，
+1. `--help` 与 `--version` 不依赖服务地址即可执行；
+2. 缺少 `POD_IP` 返回退出码 3，非对象 JSON 在连接前返回退出码 2；
+3. `--list` 完成 initialize、initialized notification 和 `tools/list`，并返回隔离后的
+   `upload_table`、`validate_table`；
+4. MCP Session ID 与协商后的协议版本 Header 会在后续请求中自动携带，真实 BFF 日志记录 Runner 使用
+   `2025-06-18` 初始化；
+5. Python Runner 连接真实启动的 BFF Script endpoint，调用 `validate_table` 后 API Fabric mock 收到一次请求，
    审计为 `caller=SCRIPT`。
 
 ## 4. 拒绝路径
@@ -99,10 +103,11 @@ caller 不进入 Tool input Schema、arguments、普通透传 Header、Path、Qu
 | 模块 | 测试 | 失败 | 错误 | 跳过 | 指令覆盖率 | 分支覆盖率 | 行覆盖率 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `dataagent-mcp` | 83 | 0 | 0 | 0 | 95.87% | 91.53% | 95.85% |
-| `dataagent-web` | 16 | 0 | 0 | 0 | 100.00% | 无生产分支 | 100.00% |
-| `dataagent-runner` | 9 | 0 | 0 | 0 | 单文件协议测试 | 单文件协议测试 | 单文件协议测试 |
+| `dataagent-web` | 18 | 0 | 0 | 0 | 100.00% | 无生产分支 | 100.00% |
 
 回归覆盖 JSON、同名 Header/Body、普通 Header 透传、API Fabric、CSE、multipart 文件、`@RequestParam`、文本 `@RequestPart`、目录隔离、caller 审计与拒绝下游零调用。所有测试方法继续由策略测试检查 `@DisplayName`。
+其中 Web 集成测试包含 3 个 Runner 用例，覆盖基础 CLI 与输入错误、真实 Script 目录查询以及真实
+BFF/API Fabric 的 Script-only Tool 调用。
 
 ### 6.2 JavaDoc
 
@@ -128,8 +133,27 @@ openspec validate control-skill-script-tool-access --strict
 
 starter JAR 包含 `McpToolRegistry`、双 Server 自动配置和 `spring-configuration-metadata.json`，不再包含 `ToolCallSource`；BFF 可执行 JAR 包含 `mcp-config.yml` 与最新 `dataagent-mcp` 依赖。配置元数据和示例配置均使用 `dataagent.mcp`。
 
-Runner 同时生成 ZIP 与 TAR.GZ。两个归档的业务内容只有权限为 `0755` 的
-`bin/dataagent-runner` 和中文 README；Runner 直接执行 `--version` 成功。
+Runner 不进入 Maven 构建产物，也不生成 ZIP/TAR。`dataagent-runner` 目录只有权限为 `0755` 的
+`bin/dataagent-runner`；首行为 `#!/usr/bin/env python3`，直接执行 `--version` 与 `--help` 成功。
+
+### 6.5 运行实例验证
+
+使用最新构建的 Web JAR 启动：
+
+```bash
+java -jar dataagent-web/target/dataagent-web-0.1.0-SNAPSHOT.jar \
+  --server.address=127.0.0.1 --server.port=8080
+```
+
+应用成功注册 `create_order`、`upload_table`、`validate_table` 并监听 `127.0.0.1:8080`。随后执行：
+
+```bash
+POD_IP=127.0.0.1 POD_PORT=8080 dataagent-runner/bin/dataagent-runner --list
+```
+
+Runner 成功完成初始化并只返回 Script 目录中的 `upload_table` 与 `validate_table`；Agent-only 的
+`create_order` 未暴露。服务端日志确认客户端名称为 `dataagent-runner`、版本为 `0.1.0-SNAPSHOT`、
+协议为 `2025-06-18`。
 
 ## 7. Opencode 回退证明
 
@@ -144,4 +168,4 @@ git diff --check
 
 ## 8. 最终结论
 
-当前实现满足“Opencode 零改造、Agent 与 Script 复用 DataAgent 统一 Tool 管理、每个 Tool 支持 Agent-only、Script-only 或共享、使用标准 MCP 请求”的目标。Script 可通过开箱即用的单文件 Runner 查询和调用工具，运行环境无需 jq 或额外依赖。服务端目录隔离负责减少暴露面，执行期授权负责最终防御，部署层负责确认谁有权进入 Script endpoint，三者职责没有混用。
+当前实现满足“Opencode 零改造、Agent 与 Script 复用 DataAgent 统一 Tool 管理、每个 Tool 支持 Agent-only、Script-only 或共享、使用标准 MCP 请求”的目标。Script 可通过单文件 Python Runner 查询和调用工具，运行环境只需 Python 3 标准库。服务端目录隔离负责减少暴露面，执行期授权负责最终防御，部署层负责确认谁有权进入 Script endpoint，三者职责没有混用。

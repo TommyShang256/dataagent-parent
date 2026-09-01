@@ -39,4 +39,4 @@
 - [x] 6.4 删除 Runner Maven 模块、归档配置、独立 README 与测试目录，确认 `dataagent-runner` 下只保留可执行文件
 - [x] 6.5 更新 Web 集成测试以直接执行 Python shebang Runner，并覆盖 CLI、Pod 地址、Session/协议 Header、错误路径及真实 BFF/API Fabric 端到端调用
 - [x] 6.6 更新父工程 README，明确 Runner 是仅依赖 Python 3 标准库的独立单文件客户端
-- [ ] 6.7 重新执行父工程验证、JavaDoc、严格 OpenSpec、JAR 与运行中 BFF 的 Runner 目录检查，并更新中文验证报告
+- [x] 6.7 重新执行父工程验证、JavaDoc、严格 OpenSpec、JAR 与运行中 BFF 的 Runner 目录检查，并更新中文验证报告
