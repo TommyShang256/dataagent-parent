@@ -35,7 +35,8 @@ class TestDisplayNamePolicyTest {
     void everyJUnitTestUsesChineseDisplayName() throws IOException {
         List<String> violations = new ArrayList<>();
         inspect(Path.of("src/test/java"), violations);
-        inspect(Path.of("../dataagent-mcp-test/src/test/java"), violations);
+        inspect(Path.of("../dataagent-web/src/test/java"), violations);
+        inspect(Path.of("../../dataagent-mcp-test/src/test/java"), violations);
         assertThat(violations)
                 .as("JUnit test methods without a Chinese @DisplayName")
                 .isEmpty();

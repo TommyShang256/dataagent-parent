@@ -117,7 +117,7 @@ Finished at: 2026-09-01T12:01:35+08:00
 
 ## 同级消费端验证
 
-`../dataagent-mcp-test` 增加 `upload_table_api` 和 `upload_table_cse`，固定目录由 3 个扩展为 5 个工具。
+`../../dataagent-mcp-test` 增加 `upload_table_api` 和 `upload_table_cse`，固定目录由 3 个扩展为 5 个工具。
 两个工具都使用 `String filePath`、普通 description、Path、Query 和业务 Header；测试确认代理方法体不执行、
 Schema 中 filePath 仍为字符串，并分别捕获 WebClient 与 RestOperations 的 multipart 语义。
 

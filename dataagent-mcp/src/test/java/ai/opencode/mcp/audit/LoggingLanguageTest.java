@@ -41,7 +41,8 @@ class LoggingLanguageTest {
         List<String> violations = new ArrayList<>();
         List<Path> sourceRoots = List.of(
                 Path.of("src/main/java"),
-                Path.of("../dataagent-mcp-test/src/main/java"));
+                Path.of("../dataagent-web/src/main/java"),
+                Path.of("../../dataagent-mcp-test/src/main/java"));
         for (Path sourceRoot : sourceRoots) {
             if (!Files.isDirectory(sourceRoot)) {
                 continue;
