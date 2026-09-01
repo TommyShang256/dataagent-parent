@@ -48,7 +48,9 @@ public final class McpToolScanner {
         this.beanFactory = beanFactory;
         this.objectMapper = objectMapper;
         this.schemaGenerator = new McpJsonSchemaGenerator(objectMapper);
-        this.endpointHandlers = endpointHandlers == null ? List.of() : List.copyOf(endpointHandlers);
+        this.endpointHandlers = endpointHandlers == null
+                ? List.of()
+                : Collections.unmodifiableList(new ArrayList<>(endpointHandlers));
     }
 
     /**

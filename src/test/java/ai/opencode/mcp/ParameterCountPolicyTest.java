@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -23,6 +24,7 @@ class ParameterCountPolicyTest {
   private static final int MAX_PARAMETERS = 5;
 
   @Test
+  @DisplayName("所有生产方法和构造器最多声明五个参数")
   void methodsAndConstructorsHaveAtMostFiveParameters() throws Exception {
     List<String> violations = new ArrayList<>();
     inspect(Path.of("target/classes"), violations);

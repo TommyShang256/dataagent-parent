@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
@@ -65,6 +66,7 @@ class RemoteToolEndpointHandlerTest {
     Path temporaryDirectory;
 
     @Test
+    @DisplayName("隔离 API Fabric 与 CSE 客户端依赖")
     void isolatesApiFabricAndCseClientDependencies() {
         List<Class<?>> apiFabricDependencies = Arrays.stream(
                         ApiFabricToolEndpointHandler.class.getDeclaredFields())
@@ -84,6 +86,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("按自动 Path、Body、Query 和 Header 规则绑定 Fabric 请求")
     void bindsFabricRequestWithAutomaticPathBodyQueryAndHeaderRules() throws Exception {
         var capture = new CaptureExchange("{\"id\":\"O-1\",\"status\":\"created\"}", HttpStatus.OK);
         var properties = validProperties();
@@ -118,6 +121,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("保留 CSE scheme 并转换泛型响应且不执行代理方法体")
     void preservesCseSchemeAndConvertsGenericResponseWithoutExecutingProxyBody() throws Exception {
         CaptureExchange fabric = new CaptureExchange("{}", HttpStatus.OK);
         CaptureRestOperations capture =
@@ -136,6 +140,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("未配置 RestTemplate 时在发布 CSE 工具前失败")
     void failsBeforePublishingCseToolWhenRestTemplateIsNotConfigured() {
         assertThatThrownBy(() -> scan(
                 validProperties(), new CaptureExchange("{}", HttpStatus.OK), null, new ProxyTools()))
@@ -144,6 +149,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("将 CSE 状态码和响应体映射为工具错误")
     void mapsCseStatusAndResponseBodyToToolError() {
         CaptureRestOperations capture =
                 new CaptureRestOperations("inventory unavailable", HttpStatus.SERVICE_UNAVAILABLE);
@@ -157,6 +163,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("未匹配的注解工具保持本地且下游错误被映射")
     void leavesUnmatchedAnnotationToolLocalAndMapsDownstreamErrors() throws Exception {
         var capture = new CaptureExchange("unavailable", HttpStatus.SERVICE_UNAVAILABLE);
         var tools = scan(validProperties(), capture, new ProxyTools());
@@ -171,6 +178,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("返回任何注册项前校验完整工具目录")
     void validatesWholeCatalogBeforeReturningAnyRegistration() {
         var duplicate = validProperties();
         var cse = new McpFabricProperties.CseEndpoint();
@@ -216,6 +224,14 @@ class RemoteToolEndpointHandlerTest {
         invalidMethod.getApiFabric().getEndpoints().get("create_order").setMethod("FETCH");
         assertFailure(invalidMethod, "API Fabric", "create_order", "method", "FETCH");
 
+        McpFabricProperties blankMethod = validProperties();
+        blankMethod.getApiFabric().getEndpoints().get("create_order").setMethod(" ");
+        assertFailure(blankMethod, "API Fabric", "create_order", "Invalid method");
+
+        McpFabricProperties blankQuerySource = validProperties();
+        blankQuerySource.getApiFabric().getEndpoints().get("create_order").getQuery().put("blank", " ");
+        assertFailure(blankQuerySource, "API Fabric", "create_order", "unknown tool parameter");
+
         McpFabricProperties absolutePath = validProperties();
         absolutePath.getApiFabric().getEndpoints().get("create_order")
                 .setPathTemplate("https://other.example/orders");
@@ -240,9 +256,41 @@ class RemoteToolEndpointHandlerTest {
         missingCseService.getCse().getEndpoints().get("reserve_inventory")
                 .setUriTemplate("cse:///warehouses/{warehouseId}/reservations");
         assertFailure(missingCseService, "CSE", "reserve_inventory", "cse://service-name");
+
+        McpFabricProperties blankBaseUrl = validProperties();
+        blankBaseUrl.getApiFabric().setBaseUrl(" ");
+        assertFailure(blankBaseUrl, "API Fabric", "base-url", "blank");
+
+        McpFabricProperties relativeBaseUrl = validProperties();
+        relativeBaseUrl.getApiFabric().setBaseUrl("fabric/base");
+        assertFailure(relativeBaseUrl, "API Fabric", "base-url", "absolute");
+
+        McpFabricProperties unsupportedBaseUrl = validProperties();
+        unsupportedBaseUrl.getApiFabric().setBaseUrl("ftp://fabric.example/base");
+        assertFailure(unsupportedBaseUrl, "API Fabric", "base-url", "http or https");
+
+        McpFabricProperties invalidBaseUrl = validProperties();
+        invalidBaseUrl.getApiFabric().setBaseUrl("https://invalid host");
+        assertFailure(invalidBaseUrl, "API Fabric", "base-url", "invalid URI");
+
+        McpFabricProperties blankCseUri = validProperties();
+        blankCseUri.getCse().getEndpoints().get("reserve_inventory").setUriTemplate(" ");
+        assertFailure(blankCseUri, "CSE", "reserve_inventory", "blank");
+
+        McpFabricProperties invalidCseUri = validProperties();
+        invalidCseUri.getCse().getEndpoints().get("reserve_inventory").setUriTemplate("cse://bad host/{id}");
+        assertFailure(invalidCseUri, "CSE", "reserve_inventory", "invalid URI");
+
+        McpFabricProperties noFabricEndpoints = new McpFabricProperties();
+        noFabricEndpoints.getCse().getEndpoints().put(
+                "reserve_inventory", validProperties().getCse().getEndpoints().get("reserve_inventory"));
+        assertThat(scan(noFabricEndpoints, new CaptureExchange("{}", HttpStatus.OK), new ProxyTools()))
+                .extracting(ToolRegistration::name)
+                .contains("reserve_inventory");
     }
 
     @Test
+    @DisplayName("发布前校验 multipart 文件映射和表单字段类型")
     void validatesMultipartFileMappingsAndFormFieldTypesBeforePublishing() {
         McpFabricProperties multiple = uploadProperties("upload");
         multiple.getApiFabric().getEndpoints().get("upload").setFiles(Map.of(
@@ -279,6 +327,10 @@ class RemoteToolEndpointHandlerTest {
         assertInvalidFormField("upload_map", "metadata");
         assertInvalidFormField("upload_raw", "metadata");
         assertInvalidFormField("upload_nested", "metadata");
+        assertThat(scan(uploadProperties("upload_scalars"), new CaptureExchange("ok", HttpStatus.OK),
+                new MultipartTools())).extracting(ToolRegistration::name).contains("upload_scalars");
+        assertThat(scan(uploadProperties("upload_boolean"), new CaptureExchange("ok", HttpStatus.OK),
+                new MultipartTools())).extracting(ToolRegistration::name).contains("upload_boolean");
         assertInvalidFormField("upload_objects", "metadata");
 
         McpFabricProperties valid = uploadProperties("upload_array");
@@ -288,6 +340,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("API Fabric 发送 multipart 文件和普通请求参数")
     void sendsApiFabricMultipartFileAndRequestParameters() throws Exception {
         Path file = Files.writeString(temporaryDirectory.resolve("schema.unknown-dsl"), "create table demo");
         McpFabricProperties properties = uploadProperties("upload");
@@ -320,6 +373,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("CSE 发送语义一致的 multipart parts")
     void sendsCseMultipartWithEquivalentParts() throws Exception {
         Path file = Files.writeString(temporaryDirectory.resolve("schema.txt"), "create table demo");
         McpFabricProperties properties = new McpFabricProperties();
@@ -358,6 +412,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("数组生成重复字段且缺失、null 和空值被省略")
     void repeatsArrayFieldsAndOmitsMissingNullAndEmptyMultipartValues() throws Exception {
         Path file = Files.writeString(temporaryDirectory.resolve("schema.dsl"), "dsl");
         CaptureExchange capture = new CaptureExchange("ok", HttpStatus.OK);
@@ -381,6 +436,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("校验上传路径、上限、符号链接并在失败时释放资源")
     void validatesUploadPathsLimitsSymlinksAndReleasesResourcesOnFailure() throws Exception {
         McpFabricProperties properties = uploadProperties("upload");
         properties.setMaxUploadFileSize(DataSize.ofBytes(3));
@@ -420,6 +476,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("省略缺失可选 Body、保留显式 null 且全消费时不发送 Body")
     void omitsMissingOptionalBodyButKeepsExplicitNullAndSendsNoBodyWhenAllConsumed() throws Exception {
         var properties = validProperties();
         var endpoint = new McpFabricProperties.ApiFabricEndpoint();
@@ -444,6 +501,7 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("转换字符串、null 和 void 类响应")
     void convertsStringNullAndVoidLikeResponses() throws Exception {
         var stringCapture = new CaptureExchange("plain text", HttpStatus.OK);
         var stringTool = tool(scan(validProperties(), stringCapture, new ProxyTools()), "string_result");
@@ -456,9 +514,14 @@ class RemoteToolEndpointHandlerTest {
         var voidCapture = new CaptureExchange("ignored", HttpStatus.OK);
         var voidTool = tool(scan(validProperties(), voidCapture, new ProxyTools()), "void_result");
         assertThat(voidTool.invoker().invoke(Map.of())).isNull();
+
+        CaptureExchange emptyCapture = new CaptureExchange("", HttpStatus.OK);
+        ToolRegistration emptyTool = tool(scan(validProperties(), emptyCapture, new ProxyTools()), "string_result");
+        assertThat(emptyTool.invoker().invoke(Map.of())).isNull();
     }
 
     @Test
+    @DisplayName("连接器、超时、路径与转换失败包含工具引用")
     void wrapsConnectorTimeoutPathAndConversionFailuresWithToolRef() {
         ExchangeFunction connectorFailure = request -> Mono.error(new IllegalStateException("connector unavailable"));
         var connectorTool = tool(scan(validProperties(), connectorFailure, new ProxyTools()), "string_result");
@@ -636,6 +699,21 @@ class RemoteToolEndpointHandlerTest {
 
         @Tool(name = "upload_objects")
         String uploadObjects(String filePath, List<UploadMetadata> metadata) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_scalars")
+        String uploadScalars(
+                String filePath,
+                Integer number,
+                Character character,
+                java.util.UUID uuid,
+                java.util.Date date) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_boolean")
+        String uploadBoolean(String filePath, Boolean enabled) {
             throw new AssertionError("Remote proxy method must not execute");
         }
     }

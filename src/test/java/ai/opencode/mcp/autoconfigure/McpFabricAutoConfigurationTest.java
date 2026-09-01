@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
@@ -46,6 +47,7 @@ class McpFabricAutoConfigurationTest {
     private final WebApplicationContextRunner runner = baseRunner.withUserConfiguration(TestConfiguration.class);
 
     @Test
+    @DisplayName("注册注解声明的工具")
     void registersAnnotatedTools() {
         runner.run(context -> {
             assertThat(context).hasSingleBean(McpToolScanner.class);
@@ -61,6 +63,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("调用注解工具并记录审计事件")
     void invokesAnnotatedToolsAndAuditsOperations() {
         runner.run(context -> {
             var registry = context.getBean(McpToolRegistry.class);
@@ -87,12 +90,14 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("默认使用 SLF4J 审计记录器")
     void usesSlf4jAuditLoggerByDefault() {
         baseRunner.run(context -> assertThat(context.getBean(ToolAuditLogger.class))
                 .isInstanceOf(Slf4jToolAuditLogger.class));
     }
 
     @Test
+    @DisplayName("审计失败调用的参数")
     void auditsFailedInvocationArguments() {
         runner.run(context -> {
             var registry = context.getBean(McpToolRegistry.class);
@@ -112,6 +117,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("仅声明 Tools 能力并发布启动目录")
     void advertisesOnlyToolsAndPublishesStartupCatalog() {
         runner.run(context -> {
             var server = context.getBean(McpSyncServer.class);
@@ -128,6 +134,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("可以禁用全部 MCP 基础设施")
     void canDisableAllMcpInfrastructure() {
         runner.withPropertyValues("opencode.mcp.enabled=false").run(context -> {
             assertThat(context).doesNotHaveBean(McpSyncServer.class);
@@ -139,6 +146,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("归一化缺少前导斜杠的 MCP 端点")
     void normalizesEndpointWithoutLeadingSlash() {
         runner.withPropertyValues("opencode.mcp.endpoint=company-mcp").run(context -> {
             var registration = (ServletRegistrationBean<?>) context.getBean("mcpServletRegistration");
@@ -147,6 +155,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("应用可以提供 CSE RestOperations")
     void applicationCanProvideCseRestOperations() {
         RestOperations custom = new RestTemplate();
         cseRunner().withBean("cseRestOperations", RestOperations.class, () -> custom).run(context -> {
@@ -161,6 +170,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("缺少命名 RestOperations 时在发布 CSE 工具前失败")
     void failsBeforePublishingCseToolWhenNamedRestOperationsIsMissing() {
         cseRunner().run(context -> {
             assertThat(context).hasFailed();
@@ -171,6 +181,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("应用可以替换 API Fabric WebClient")
     void applicationCanReplaceApiFabricWebClient() {
         WebClient custom = WebClient.builder().build();
         baseRunner.withBean("apiFabricWebClient", WebClient.class, () -> custom).run(context ->
@@ -184,6 +195,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("创建相互独立的默认端点处理器")
     void createsIndependentDefaultEndpointHandlers() {
         baseRunner.run(context -> {
             assertThat(context.getBeansOfType(RemoteToolEndpointHandler.class)).hasSize(2);
@@ -193,6 +205,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("应用可以只替换 API Fabric 端点处理器")
     void applicationCanReplaceOnlyApiFabricEndpointHandler() {
         RemoteToolEndpointHandler custom = new StubEndpointHandler("自定义 API Fabric");
         baseRunner.withBean(
@@ -207,6 +220,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("应用可以只替换 CSE 端点处理器")
     void applicationCanReplaceOnlyCseEndpointHandler() {
         RemoteToolEndpointHandler custom = new StubEndpointHandler("自定义 CSE");
         baseRunner.withBean(
@@ -221,6 +235,7 @@ class McpFabricAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("应用可以增加其他远程端点处理器")
     void applicationCanAddAnotherEndpointHandler() {
         RemoteToolEndpointHandler extension = new StubEndpointHandler("扩展端点");
         baseRunner.withBean(

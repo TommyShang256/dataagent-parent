@@ -16,6 +16,7 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
@@ -31,6 +32,7 @@ class McpToolScannerTest {
             new DefaultListableBeanFactory(), new ObjectMapper().findAndRegisterModules(), List.of());
 
     @Test
+    @DisplayName("区分缺失值与 null 并创建空 Optional")
     void distinguishesMissingAndNullAndCreatesEmptyOptionals() throws Exception {
         ToolRegistration registration = tool("parameters");
 
@@ -44,6 +46,7 @@ class McpToolScannerTest {
     }
 
     @Test
+    @DisplayName("使用配置的 ObjectMapper 转换已提供参数")
     void convertsPresentValuesThroughConfiguredMapper() throws Exception {
         ToolRegistration registration = tool("parameters");
         Result result = (Result) registration.invoker().invoke(Map.of(
@@ -61,6 +64,7 @@ class McpToolScannerTest {
     }
 
     @Test
+    @DisplayName("拒绝显式 null 和非法 primitive 参数")
     void rejectsExplicitNullAndInvalidPrimitiveValues() {
         ToolRegistration registration = tool("parameters");
         var nullPrimitive = nullableArguments();
@@ -74,9 +78,33 @@ class McpToolScannerTest {
     }
 
     @Test
+    @DisplayName("扫描阶段拒绝可选 primitive 参数")
     void rejectsOptionalPrimitiveDuringDiscovery() {
         assertThatThrownBy(() -> scanner.scan(new InvalidTools()))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("cannot be optional");
+    }
+
+    @Test
+    @DisplayName("传播工具方法抛出的受检异常和 Error")
+    void propagatesCheckedExceptionsAndErrorsFromToolMethods() {
+        List<ToolRegistration> tools = scanner.scan(new FailingTools());
+        ToolRegistration checked = tools.stream().filter(tool -> tool.name().equals("checked")).findFirst().orElseThrow();
+        ToolRegistration error = tools.stream().filter(tool -> tool.name().equals("error")).findFirst().orElseThrow();
+
+        assertThatThrownBy(() -> checked.invoker().invoke(Map.of()))
+                .isInstanceOf(Exception.class)
+                .hasMessage("checked failure");
+        assertThatThrownBy(() -> error.invoker().invoke(Map.of()))
+                .isInstanceOf(AssertionError.class)
+                .hasMessage("error failure");
+    }
+
+    @Test
+    @DisplayName("ToolParam 显式名称同时用于 Schema 和调用参数")
+    void usesExplicitToolParameterNameForSchemaAndInvocation() throws Exception {
+        ToolRegistration registration = scanner.scan(new RenamedTools()).getFirst();
+        assertThat(registration.inputSchema().toString()).contains("external");
+        assertThat(registration.invoker().invoke(Map.of("external", "value"))).isEqualTo("value");
     }
 
     private static java.util.LinkedHashMap<String, Object> nullableArguments() {
@@ -120,6 +148,27 @@ class McpToolScannerTest {
         @Tool(name = "numeric_optionals")
         NumericResult numericOptionals(OptionalLong optionalLong, OptionalDouble optionalDouble) {
             return new NumericResult(optionalLong, optionalDouble);
+        }
+    }
+
+    static class FailingTools {
+
+        @Tool(name = "checked")
+        String checked() throws Exception {
+            throw new Exception("checked failure");
+        }
+
+        @Tool(name = "error")
+        String error() {
+            throw new AssertionError("error failure");
+        }
+    }
+
+    static class RenamedTools {
+
+        @Tool(title = "命名工具", description = "验证显式参数名称")
+        String renamed(@ToolParam(name = "external") String internal) {
+            return internal;
         }
     }
 

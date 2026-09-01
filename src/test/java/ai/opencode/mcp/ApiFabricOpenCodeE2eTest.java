@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.WebApplicationType;
@@ -84,6 +85,7 @@ class ApiFabricOpenCodeE2eTest {
             """;
 
     @Test
+    @DisplayName("OpenCode 客户端通过标准 MCP 请求调用 API Fabric")
     void opencodeClientInvokesApiFabricThroughStandardMcpRequests() throws Exception {
         Path opencodeRepository = opencodeRepository();
         assumeTrue(Files.isRegularFile(opencodeRepository.resolve("packages/core/package.json")),

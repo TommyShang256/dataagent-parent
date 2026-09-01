@@ -19,6 +19,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +36,7 @@ class LoggingLanguageTest {
     private static final Pattern CHINESE = Pattern.compile("\\p{IsHan}");
 
     @Test
+    @DisplayName("生产运行时字符串不包含中文文本")
     void productionRuntimeStringsDoNotContainChineseText() throws IOException {
         List<String> violations = new ArrayList<>();
         List<Path> sourceRoots = List.of(
@@ -59,6 +61,7 @@ class LoggingLanguageTest {
     }
 
     @Test
+    @DisplayName("审计日志使用英文模板")
     void auditLoggerFormatsEnglishTemplate() {
         Logger logger = (Logger) LoggerFactory.getLogger(Slf4jToolAuditLogger.LOGGER_NAME);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();

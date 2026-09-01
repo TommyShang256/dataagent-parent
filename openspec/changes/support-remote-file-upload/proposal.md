@@ -13,6 +13,7 @@
 - API Fabric 使用其独立 WebClient、CSE 使用应用提供的 `cseRestOperations` 发送 multipart 请求；两条路径都以文件资源方式传输并确保请求完成后不遗留打开的文件句柄。
 - 不限制 `filePath` 的根目录或符号链接目标；文件系统沙箱由后续 BFF 能力负责。
 - 更新配置元数据、README、消费端示例和完整调测记录，并覆盖文件、普通表单参数、Header、错误与资源边界的自动化测试。
+- 为 starter 增加 JaCoCo 构建门禁，生产代码指令覆盖率和分支覆盖率均至少为 91%；主工程与消费端每个 JUnit 测试用例使用中文 `@DisplayName` 命名。
 
 ## Capabilities
 

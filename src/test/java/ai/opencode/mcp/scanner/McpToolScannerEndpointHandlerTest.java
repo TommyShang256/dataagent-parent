@@ -9,10 +9,12 @@ import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
@@ -25,6 +27,7 @@ import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 class McpToolScannerEndpointHandlerTest {
 
     @Test
+    @DisplayName("未匹配远程处理器的工具保持本地执行")
     void leavesUnmatchedToolLocal() throws Exception {
         McpToolScanner scanner = scanner(List.of());
 
@@ -37,6 +40,7 @@ class McpToolScannerEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("拒绝多个处理器声明相同远程引用")
     void rejectsDuplicateReferenceAcrossHandlers() {
         McpToolScanner scanner = scanner(List.of(
                 new StubEndpointHandler("API Fabric", Set.of("shared")),
@@ -48,6 +52,7 @@ class McpToolScannerEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("拒绝没有对应注解工具的远程引用")
     void rejectsReferenceWithoutAnnotatedTool() {
         McpToolScanner scanner = scanner(List.of(
                 new StubEndpointHandler("Custom endpoint", Set.of("missing"))));
@@ -55,6 +60,27 @@ class McpToolScannerEndpointHandlerTest {
         assertThatThrownBy(() -> scanner.scan(new LocalTools()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Custom endpoint", "missing", "no matching annotated tool");
+    }
+
+    @Test
+    @DisplayName("拒绝 null、空类型、null 引用集和空白引用的远程处理器")
+    void rejectsMalformedEndpointHandlers() {
+        assertThat(scanner(null).scan(new LocalTools())).hasSize(1);
+        assertThatThrownBy(() -> scanner(Arrays.asList((RemoteToolEndpointHandler) null)).scan(new LocalTools()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must not be null");
+        assertThatThrownBy(() -> scanner(List.of(new StubEndpointHandler(" ", Set.of())))
+                .scan(new LocalTools()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("type must not be blank");
+        assertThatThrownBy(() -> scanner(List.of(new StubEndpointHandler("Null references", null)))
+                .scan(new LocalTools()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("null reference set");
+        assertThatThrownBy(() -> scanner(List.of(new StubEndpointHandler("Blank reference", Set.of(" "))))
+                .scan(new LocalTools()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ref must not be blank");
     }
 
     private static McpToolScanner scanner(List<RemoteToolEndpointHandler> handlers) {

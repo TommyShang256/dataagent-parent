@@ -77,3 +77,14 @@ API Fabric 的 WebClient 路径与 CSE 的 RestOperations 路径 SHALL 发送语
 #### Scenario: 现有 JSON 端点保持不变
 - **WHEN** API Fabric 或 CSE 端点没有配置文件映射
 - **THEN** 该端点继续使用现有 JSON Object Body 规则，不生成 multipart 请求
+
+### Requirement: 自动化测试质量门禁
+starter SHALL 在 Maven `verify` 阶段使用 JaCoCo 检查全部生产代码，指令覆盖率和分支覆盖率 MUST 均至少为 91%。主工程与同级消费端的每个 JUnit 测试方法 MUST 使用中文 `@DisplayName` 描述被验证的行为，并由自动化测试检查，避免后续新增匿名测试用例。
+
+#### Scenario: 覆盖率不足时构建失败
+- **WHEN** starter 的指令覆盖率或分支覆盖率低于 91%
+- **THEN** Maven `verify` 失败并报告未满足的覆盖率指标
+
+#### Scenario: 测试用例缺少显示名称
+- **WHEN** 主工程或消费端存在未使用 `@DisplayName` 的 JUnit 测试方法
+- **THEN** 测试命名策略检查失败并指出对应源码与方法

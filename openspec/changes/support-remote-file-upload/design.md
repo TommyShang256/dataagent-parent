@@ -110,6 +110,19 @@ Schema generator 不引入文件格式，`filePath` 仍是字符串。Registry �
 按 HTTP method 或文件名猜测。API Fabric/CSE handler 的公共 SPI 不增加文件专用方法，第三方 handler 是否支持
 multipart 由其是否接受共享 payload 决定；当前项目只承诺两个内置 handler。
 
+### 6. 使用 JaCoCo 与测试命名策略形成持续门禁
+
+starter 在 `verify` 阶段执行 JaCoCo bundle 级检查，指令覆盖率和分支覆盖率最低值均设为 `0.91`。选择两个指标
+而不只使用行覆盖率，是为了同时约束主要执行路径和文件校验、参数绑定、客户端分流中的条件分支。覆盖率统计只包含
+生产代码，测试夹具不进入分母；门禁是构建的一部分，后续代码降低覆盖率时直接失败。
+
+主工程增加源码级测试命名策略检查，扫描主工程与同级消费端测试源码，要求每个 JUnit `@Test`、
+`@ParameterizedTest`、`@RepeatedTest` 或 `@TestFactory` 方法都显式使用中文 `@DisplayName`。测试类和
+`@TestConfiguration` 不作为测试用例。源码级检查比依赖测试报告中的动态名称更早发现遗漏，并能够报告具体文件。
+
+备选方案是只在本次补充 `@DisplayName` 而不增加策略测试；不采用，因为后续新增用例仍可能退化。备选方案是仅统计
+文件上传包覆盖率；不采用，因为用户要求当前项目的高覆盖率，局部统计会隐藏配置、扫描和注册路径的缺口。
+
 ## Risks / Trade-offs
 
 - [任意 filePath 可读取应用权限范围内的文件] → 按用户决定不在 starter 中增加白名单；文档明确该能力只应部署在具有 BFF 沙箱或等价隔离的环境。

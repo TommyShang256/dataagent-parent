@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -21,6 +22,7 @@ import org.springframework.util.unit.DataSize;
 class McpFabricPropertiesTest {
 
     @Test
+    @DisplayName("空配置生成确定的空端点映射")
     void emptyConfigurationHasDeterministicEmptyEndpointMaps() {
         var properties = new McpFabricProperties();
         assertThat(properties.getApiFabric().getEndpoints()).isEmpty();
@@ -29,6 +31,7 @@ class McpFabricPropertiesTest {
     }
 
     @Test
+    @DisplayName("绑定文档约定的 API Fabric 与 CSE 配置结构")
     void bindsDocumentedFabricAndCseShape() {
         var source = new MapConfigurationPropertySource(Map.ofEntries(
                 Map.entry("opencode.mcp.api-fabric.base-url", "https://fabric.example/api"),
@@ -55,6 +58,7 @@ class McpFabricPropertiesTest {
     }
 
     @Test
+    @DisplayName("端点模型不暴露已删除的过度设计位置")
     void endpointModelDoesNotExposeRemovedOverdesignedLocations() {
         assertThat(java.util.Arrays.stream(McpFabricProperties.Endpoint.class.getMethods())
                 .map(java.lang.reflect.Method::getName))
@@ -62,6 +66,7 @@ class McpFabricPropertiesTest {
     }
 
     @Test
+    @DisplayName("文件映射被归一化和复制且非法大小被拒绝")
     void normalizesAndCopiesFileMappingsAndRejectsInvalidSize() {
         McpFabricProperties.ApiFabricEndpoint endpoint = new McpFabricProperties.ApiFabricEndpoint();
         Map<String, String> files = new LinkedHashMap<>();
@@ -80,5 +85,57 @@ class McpFabricPropertiesTest {
         assertThatThrownBy(() -> properties.setMaxUploadFileSize(null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("max-upload-file-size");
+    }
+
+    @Test
+    @DisplayName("所有嵌套配置执行 null 归一化和非空防御性复制")
+    void normalizesAndDefensivelyCopiesEveryNestedConfiguration() {
+        McpFabricProperties properties = new McpFabricProperties();
+        McpFabricProperties.ApiFabric apiFabric = new McpFabricProperties.ApiFabric();
+        McpFabricProperties.Cse cse = new McpFabricProperties.Cse();
+        properties.setApiFabric(apiFabric);
+        properties.setCse(cse);
+        assertThat(properties.getApiFabric()).isSameAs(apiFabric);
+        assertThat(properties.getCse()).isSameAs(cse);
+        properties.setApiFabric(null);
+        properties.setCse(null);
+        assertThat(properties.getApiFabric()).isNotNull();
+        assertThat(properties.getCse()).isNotNull();
+
+        Map<String, McpFabricProperties.ApiFabricEndpoint> fabricEndpoints = new LinkedHashMap<>();
+        fabricEndpoints.put("fabric", new McpFabricProperties.ApiFabricEndpoint());
+        apiFabric.setEndpoints(fabricEndpoints);
+        fabricEndpoints.clear();
+        assertThat(apiFabric.getEndpoints()).containsKey("fabric");
+        apiFabric.setEndpoints(null);
+        assertThat(apiFabric.getEndpoints()).isEmpty();
+
+        Map<String, McpFabricProperties.CseEndpoint> cseEndpoints = new LinkedHashMap<>();
+        cseEndpoints.put("cse", new McpFabricProperties.CseEndpoint());
+        cse.setEndpoints(cseEndpoints);
+        cseEndpoints.clear();
+        assertThat(cse.getEndpoints()).containsKey("cse");
+        cse.setEndpoints(null);
+        assertThat(cse.getEndpoints()).isEmpty();
+
+        McpFabricProperties.ApiFabricEndpoint endpoint = new McpFabricProperties.ApiFabricEndpoint();
+        Map<String, String> query = new LinkedHashMap<>(Map.of("query", "source"));
+        endpoint.setQuery(query);
+        query.clear();
+        assertThat(endpoint.getQuery()).containsKey("query");
+        endpoint.setQuery(null);
+        assertThat(endpoint.getQuery()).isEmpty();
+
+        McpFabricProperties.Headers headers = new McpFabricProperties.Headers();
+        endpoint.setHeaders(headers);
+        assertThat(endpoint.getHeaders()).isSameAs(headers);
+        endpoint.setHeaders(null);
+        assertThat(endpoint.getHeaders()).isNotNull();
+        Map<String, String> business = new LinkedHashMap<>(Map.of("X-Biz", "source"));
+        headers.setBusiness(business);
+        business.clear();
+        assertThat(headers.getBusiness()).containsKey("X-Biz");
+        headers.setBusiness(null);
+        assertThat(headers.getBusiness()).isEmpty();
     }
 }

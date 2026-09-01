@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.Test;
 class McpToolRegistryTest {
 
     @Test
+    @DisplayName("注册表不暴露运行时修改方法")
     void exposesNoRuntimeMutationMethods() {
         assertThat(Arrays.stream(McpToolRegistry.class.getMethods()).map(java.lang.reflect.Method::getName))
                 .doesNotContain("register", "remove");
@@ -43,6 +45,7 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("发布工具前拒绝重复目录项")
     void rejectsDuplicateCatalogBeforePublishingTools() {
         var server = new FakeToolServer();
         var registry = registry(
@@ -56,6 +59,7 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("启动注册失败时回滚服务端工具")
     void rollsBackServerRegistrationsWhenStartupRegistrationFails() {
         var server = new FakeToolServer();
         server.reject = "second";
@@ -70,6 +74,7 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("审计失败不改变注册与业务结果")
     void auditFailuresDoNotChangeRegistrationOrBusinessOutcome() throws Exception {
         var success = registration("success", arguments -> "ok");
         var failure = registration("failure", arguments -> {
@@ -89,6 +94,7 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("记录完整的注册与调用审计事件")
     void recordsCompleteRegistrationAndInvocationEvents() throws Exception {
         var events = new ArrayList<ToolAuditEvent>();
         var registry = registry(List.of(registration("echo", arguments -> arguments.get("message"))),
@@ -105,6 +111,7 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("映射 MCP 调用结果与错误")
     void mapsMcpFacingResultsAndErrors() {
         var registry = registry(List.of(), new FakeToolServer(), event -> {
         });
@@ -126,6 +133,7 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("生成的工具规格调用 MCP 处理器")
     void generatedSpecificationInvokesMcpHandler() {
         McpToolRegistry registry = registry(List.of(), new FakeToolServer(), event -> {
         });
@@ -152,6 +160,7 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("传递传输上下文且不审计请求 Header")
     void passesTransportContextThroughHandlerAndAuditWrapperWithoutAuditingHeaders() throws Exception {
         var received = new AtomicReference<Map<String, List<String>>>();
         ToolInvoker contextAware = new ToolInvoker() {
