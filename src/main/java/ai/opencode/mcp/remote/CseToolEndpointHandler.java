@@ -12,10 +12,13 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.lang.Nullable;
 import org.springframework.util.StringUtils;
+import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestOperations;
 
@@ -49,7 +52,8 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
             @Nullable RestOperations cseClient) {
         this.properties = properties.getCse();
         this.client = cseClient;
-        this.bindingFactory = new RemoteToolInvokerBinder(objectMapper);
+        this.bindingFactory = new RemoteToolInvokerBinder(
+                objectMapper, properties.getMaxUploadFileSize().toBytes());
     }
 
     /**
@@ -117,7 +121,10 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
     private Object exchange(
             String reference,
             RemoteToolInvokerBinder.RemoteRequest remoteRequest) {
-        HttpEntity<Object> requestEntity = new HttpEntity<>(remoteRequest.body, remoteRequest.headers);
+        Object body = remoteRequest.payload.isMultipart()
+                ? multipartBody(remoteRequest.payload)
+                : remoteRequest.payload.json;
+        HttpEntity<Object> requestEntity = new HttpEntity<>(body, remoteRequest.headers);
         ParameterizedTypeReference<?> responseType = ParameterizedTypeReference.forType(remoteRequest.returnType);
         try {
             ResponseEntity<?> response = client.exchange(
@@ -133,5 +140,16 @@ public final class CseToolEndpointHandler implements RemoteToolEndpointHandler {
                     "Remote tool " + reference + " returned HTTP " + exception.getStatusCode().value()
                             + ": " + exception.getResponseBodyAsString(), exception);
         }
+    }
+
+    private static MultiValueMap<String, HttpEntity<?>> multipartBody(
+            RemoteToolInvokerBinder.RequestPayload payload) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        RemoteToolInvokerBinder.FilePart file = payload.file;
+        builder.part(file.name, new FileSystemResource(file.path))
+                .filename(file.path.getFileName().toString())
+                .contentType(file.mediaType);
+        payload.fields.forEach((name, values) -> values.forEach(value -> builder.part(name, value)));
+        return builder.build();
     }
 }

@@ -188,7 +188,9 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
         return McpServerFeatures.SyncToolSpecification.builder()
                 .tool(tool)
                 .callHandler((exchange, request) -> call(
-                        registration, request.arguments(), exchange == null ? Map.of() : headers(exchange.transportContext())))
+                        registration,
+                        request.arguments(),
+                        exchange == null ? Map.of() : RemoteRequestHeaders.from(exchange.transportContext())))
                 .build();
     }
 
@@ -216,28 +218,6 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
                     .isError(true)
                     .build();
         }
-    }
-
-    private static Map<String, List<String>> headers(
-            io.modelcontextprotocol.common.McpTransportContext transportContext) {
-        if (transportContext == null) {
-            return Map.of();
-        }
-        Object value = transportContext.get(RemoteRequestHeaders.class.getName());
-        if (!(value instanceof Map<?, ?> map)) {
-            return Map.of();
-        }
-        Map<String, List<String>> result = new LinkedHashMap<>();
-        map.forEach((name, values) -> {
-            if (name instanceof String headerName && values instanceof List<?> list) {
-                List<String> headerValues = list.stream()
-                        .filter(String.class::isInstance)
-                        .map(String.class::cast)
-                        .toList();
-                result.put(headerName, headerValues);
-            }
-        });
-        return Collections.unmodifiableMap(result);
     }
 
     private void audit(

@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -38,13 +39,18 @@ class ApiFabricOpenCodeE2eTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    @TempDir
+    Path temporaryDirectory;
+
     private static final String CLIENT_SCRIPT = """
             import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
             import { MCPClient } from "@opencode-ai/core/mcp/client"
             import { Effect } from "effect"
 
             const url = process.env.MCP_E2E_URL
+            const filePath = process.env.MCP_E2E_FILE
             if (!url) throw new Error("MCP_E2E_URL is required")
+            if (!filePath) throw new Error("MCP_E2E_FILE is required")
 
             const result = await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
               const connection = yield* MCPClient.connect(
@@ -67,7 +73,11 @@ class ApiFabricOpenCodeE2eTest {
                   customerId: "C-1",
                 },
               })
-              return { tools: tools.map((tool) => tool.name), call }
+              const upload = yield* connection.callTool({
+                name: "upload_table",
+                args: { filePath, description: "opencode upload" },
+              })
+              return { tools: tools.map((tool) => tool.name), call, upload }
             })))
 
             process.stdout.write(JSON.stringify(result))
@@ -80,23 +90,32 @@ class ApiFabricOpenCodeE2eTest {
                 "Set -Dopencode.repository to an opencode V2 checkout");
         assumeTrue(commandSucceeds("bun", "--version"), "Bun is required for the opencode client test");
 
-        AtomicReference<CapturedRequest> captured = new AtomicReference<>();
+        Path uploadFile = Files.writeString(temporaryDirectory.resolve("table.dsl"), "create table demo");
+        AtomicReference<CapturedRequest> orderCaptured = new AtomicReference<>();
+        AtomicReference<CapturedRequest> uploadCaptured = new AtomicReference<>();
         HttpServer apiFabric = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        apiFabric.createContext("/api/orders/O-1", exchange -> handleApiFabric(exchange, captured));
+        apiFabric.createContext("/api/orders/O-1", exchange -> handleApiFabric(
+                exchange, orderCaptured, "{\"id\":\"O-1\",\"status\":\"created\"}", "application/json"));
+        apiFabric.createContext("/api/tables", exchange -> handleApiFabric(
+                exchange, uploadCaptured, "uploaded", "text/plain"));
         apiFabric.start();
 
         try (ConfigurableApplicationContext application = startMcpServer(apiFabric.getAddress().getPort())) {
             int mcpPort = ((WebServerApplicationContext) application).getWebServer().getPort();
-            JsonNode clientResult = runOpenCodeClient(opencodeRepository, mcpPort);
+            JsonNode clientResult = runOpenCodeClient(opencodeRepository, mcpPort, uploadFile);
 
-            assertThat(clientResult.path("tools").toString()).contains("\"create_order\"");
-            assertThat(clientResult.path("call").path("isError").asBoolean()).isFalse();
+            assertThat(clientResult.path("tools").toString()).contains("\"create_order\"", "\"upload_table\"");
+            assertThat(clientResult.path("call").path("isError").asBoolean())
+                    .as(clientResult.toPrettyString()).isFalse();
             assertThat(clientResult.path("call").path("content").get(0).path("type").asText()).isEqualTo("text");
             assertThat(OBJECT_MAPPER.readTree(
                     clientResult.path("call").path("content").get(0).path("text").asText()))
                     .isEqualTo(OBJECT_MAPPER.readTree("{\"id\":\"O-1\",\"status\":\"created\"}"));
+            assertThat(clientResult.path("upload").path("isError").asBoolean()).isFalse();
+            assertThat(clientResult.path("upload").path("content").get(0).path("text").asText())
+                    .contains("uploaded");
 
-            CapturedRequest request = captured.get();
+            CapturedRequest request = orderCaptured.get();
             assertThat(request).isNotNull();
             assertThat(request.method()).isEqualTo("POST");
             assertThat(request.uri()).isEqualTo("/api/orders/O-1?verbose=true");
@@ -105,9 +124,22 @@ class ApiFabricOpenCodeE2eTest {
             assertThat(request.headers().contentType()).isEqualTo("application/json");
             assertThat(OBJECT_MAPPER.readTree(request.body()))
                     .isEqualTo(OBJECT_MAPPER.readTree("{\"customerId\":\"C-1\"}"));
+
+            CapturedRequest upload = uploadCaptured.get();
+            assertThat(upload).isNotNull();
+            assertThat(upload.method()).isEqualTo("POST");
+            assertThat(upload.uri()).isEqualTo("/api/tables");
+            assertThat(upload.headers().traceId()).isEqualTo("opencode-e2e");
+            assertThat(upload.headers().contentType()).startsWith("multipart/form-data;boundary=");
+            assertThat(upload.body()).contains(
+                    "name=\"dsl\"", "filename=\"table.dsl\"", "create table demo",
+                    "name=\"description\"", "opencode upload");
         } finally {
             apiFabric.stop(0);
         }
+        assertThat(Files.exists(uploadFile)).isTrue();
+        Files.delete(uploadFile);
+        assertThat(Files.exists(uploadFile)).isFalse();
     }
 
     private static ConfigurableApplicationContext startMcpServer(int apiFabricPort) {
@@ -122,14 +154,18 @@ class ApiFabricOpenCodeE2eTest {
                         "opencode.mcp.api-fabric.endpoints.create_order.method=POST",
                         "opencode.mcp.api-fabric.endpoints.create_order.path-template=/orders/{orderId}",
                         "opencode.mcp.api-fabric.endpoints.create_order.query.verbose=verbose",
-                        "opencode.mcp.api-fabric.endpoints.create_order.headers.business.X-Biz-Mode=bizMode")
+                        "opencode.mcp.api-fabric.endpoints.create_order.headers.business.X-Biz-Mode=bizMode",
+                        "opencode.mcp.api-fabric.endpoints.upload_table.method=POST",
+                        "opencode.mcp.api-fabric.endpoints.upload_table.path-template=/tables",
+                        "opencode.mcp.api-fabric.endpoints.upload_table.files.dsl=filePath")
                 .run();
     }
 
-    private static JsonNode runOpenCodeClient(Path repository, int mcpPort) throws Exception {
+    private static JsonNode runOpenCodeClient(Path repository, int mcpPort, Path uploadFile) throws Exception {
         ProcessBuilder builder = new ProcessBuilder("bun", "-e", CLIENT_SCRIPT);
         builder.directory(repository.resolve("packages/core").toFile());
         builder.environment().put("MCP_E2E_URL", "http://127.0.0.1:" + mcpPort + "/rest/mcp");
+        builder.environment().put("MCP_E2E_FILE", uploadFile.toString());
         Process process = builder.start();
         boolean completed = process.waitFor(Duration.ofSeconds(30).toMillis(), TimeUnit.MILLISECONDS);
         if (!completed) {
@@ -144,7 +180,9 @@ class ApiFabricOpenCodeE2eTest {
 
     private static void handleApiFabric(
             HttpExchange exchange,
-            AtomicReference<CapturedRequest> captured) throws IOException {
+            AtomicReference<CapturedRequest> captured,
+            String responseBody,
+            String responseType) throws IOException {
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         captured.set(new CapturedRequest(
                 exchange.getRequestMethod(),
@@ -154,8 +192,8 @@ class ApiFabricOpenCodeE2eTest {
                         exchange.getRequestHeaders().getFirst("X-Biz-Mode"),
                         exchange.getRequestHeaders().getFirst("Content-Type")),
                 body));
-        byte[] response = "{\"id\":\"O-1\",\"status\":\"created\"}".getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        byte[] response = responseBody.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", responseType);
         exchange.sendResponseHeaders(200, response.length);
         exchange.getResponseBody().write(response);
         exchange.close();
@@ -207,6 +245,11 @@ class ApiFabricOpenCodeE2eTest {
                 boolean verbose,
                 String bizMode,
                 @ToolParam(required = false) String customerId) {
+            throw new IllegalStateException("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_table", description = "Upload a table DSL")
+        String uploadTable(String filePath, String description) {
             throw new IllegalStateException("Remote proxy method must not execute");
         }
     }

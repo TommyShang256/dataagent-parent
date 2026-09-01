@@ -54,6 +54,7 @@ opencode:
     server-version: 0.1.0
     request-timeout: 5m
     max-request-size: 16MB
+    max-upload-file-size: 100MB
     api-fabric:
       base-url: https://api-fabric.example.com/v1
       endpoints:
@@ -65,6 +66,11 @@ opencode:
           headers:
             business:
               X-Biz-Mode: bizMode
+        create_table:
+          method: POST
+          path-template: /v1/createTable
+          files:
+            dsl: filePath
     cse:
       endpoints:
         reserve_inventory:
@@ -82,8 +88,10 @@ opencode:
 1. URI 模板中的 `{tenantId}` 自动消费同名工具参数作为 Path，不配置 Path 映射，也不支持重命名。
 2. `query` 使用“下游参数名: 工具参数名”，集合值生成重复 Query 项。
 3. `headers.business` 使用“下游 Header 名: 工具参数名”，其参数继续出现在 Schema 和审计 arguments 中。
-4. 排除 Path、Query、业务 Header 参数后，其余已提供的工具参数按原名组成 JSON Object Body。可选参数缺失时省略，显式 null 保留；没有剩余参数时不发送 Body。
-5. 参数位置不按 HTTP method 推断。因此 GET 存在剩余参数时也会携带 JSON Body；需要无 Body 的 GET 时，应让模板、Query 或业务 Header 消费全部参数。
+4. 未配置 `files` 时，排除 Path、Query、业务 Header 参数后的其余参数按原名组成 JSON Object Body。可选参数缺失时省略，显式 null 保留；没有剩余参数时不发送 Body。
+5. `files` 使用“下游文件 part 名: String 工具参数名”，当前每个端点只支持一个文件 part。配置后请求切换为 `multipart/form-data`，文件参数不再进入普通字段。
+6. multipart 模式下，排除 Path、Query、业务 Header 和文件参数后的其余标量参数按原名生成文本表单字段，可供下游 `@RequestParam` 接收；数组和标量集合生成同名重复字段，缺失或 null 省略。
+7. 参数位置不按 HTTP method 推断。因此 GET 存在剩余参数时也会携带 JSON Body；需要无 Body 的 GET 时，应让模板、Query 或业务 Header 消费全部参数。
 
 API Fabric 将公共 `base-url` 与 `path-template` 组合。CSE 的完整 `cse://service-name/...` URI 在模板展开后原样交给客户端，starter 不改写 scheme、不做服务发现。
 
@@ -161,11 +169,44 @@ Schema 生成器基于配置的 Jackson 反序列化模型，支持常用标量�
 数组与集合、Map、Optional、record/bean、继承、嵌套泛型和递归 `$defs`。根工具参数保持展开，普通对象默认
 `additionalProperties: false`。缺失键与显式 JSON null 分别处理；primitive 不接受 null。
 
-## 文件上传待办
+## multipart 文件上传
 
-当前版本只支持 JSON Object Body，不实现 `multipart/form-data` 或文件上传。后续设计需整体覆盖文件与表单字段、
-Content-Type 和 boundary、单文件及总大小限制、流式传输、取消和异常时的临时资源清理，不能在现有 Body 规则上
-零散增加特殊分支。
+Tool 只声明普通字符串文件路径，starter 在远程调用时把它转换为文件 part：
+
+```java
+@Tool(name = "create_table")
+public String createTable(String filePath, String catalog, Boolean overwrite) {
+  throw new AssertionError("Remote proxy tool method body must not execute");
+}
+```
+
+```yaml
+create_table:
+  method: POST
+  path-template: /v1/createTable
+  files:
+    dsl: filePath
+```
+
+对应下游接口可以使用：
+
+```java
+public void createTable(
+    @RequestPart("dsl") MultipartFile file,
+    @RequestParam("catalog") String catalog,
+    @RequestParam(value = "overwrite", required = false) Boolean overwrite) {
+}
+```
+
+上传前会校验路径非空、语法有效、存在、为可读普通文件并且不超过
+`opencode.mcp.max-upload-file-size`，默认上限为 `100MB`。文件名取路径末段；无法探测媒体类型时使用
+`application/octet-stream`。API Fabric 与 CSE 都使用文件 Resource 写出内容，不先把完整文件载入 byte 数组。
+
+starter 不限制文件根目录，也允许解析到普通文件的符号链接；部署方必须由 BFF 沙箱或进程文件权限限制可读取范围。
+默认审计会记录 `filePath` arguments，但不会读取或记录文件内容，敏感路径需要由应用审计实现脱敏。
+
+当前不支持一次上传多个文件、复杂对象表单字段或 JSON `@RequestPart`。普通 multipart 参数只支持标量、标量数组
+和具有明确标量泛型的 Collection，并使用 Tool 参数原名作为 `@RequestParam` 名称。
 
 ## 构建
 

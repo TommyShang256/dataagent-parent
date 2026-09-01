@@ -267,3 +267,56 @@ starter 构建可运行；本次实际执行环境中两项依赖均存在，因
 opencode V2 能将当前 dataagent-mcp 配置为远程 MCP Server，完成标准 initialize、
 `tools/list` 和 `tools/call`。`tools/call` 能经由当前 API Fabric handler 发起真实 HTTP
 请求，且 Path、Query、业务 Header、透传 Header、JSON Body 和返回类型转换均与当前设计一致。
+
+## Transport Header 职责收敛验证
+
+### 重构结果
+
+原 `McpToolRegistry.headers` 中对 transport context key、未类型化值、Header 名称与值类型的处理，
+已下沉为 `RemoteRequestHeaders.from`。Registry 只负责从 MCP exchange 取得 transport context 并消费
+类型化的不可变 `Map<String, List<String>>`，不再知道 Header 在 context 中的存储约定。
+
+读取方法对空 context、缺少目标值和非 Map 值返回空映射；对 Map 中非字符串名称、非 List 值及
+List 中非字符串项进行过滤。返回结果同时复制外层 Map 和内层 List，源集合后续修改不会影响调用，
+调用方也不能修改返回集合。
+
+### 测试与构建结果
+
+```text
+mvn -Dtest=RemoteRequestHeadersTest,McpToolRegistryTest test
+Tests run: 12, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+Total time: 2.267 s
+Finished at: 2026-09-01T11:00:06+08:00
+
+mvn clean verify
+Tests run: 56, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+Total time: 5.275 s
+Finished at: 2026-09-01T11:00:54+08:00
+```
+
+全量构建再次执行了真实 opencode MCP Client 端到端测试，initialize、`tools/list`、`tools/call`
+及 API Fabric mock 请求均成功，证明职责下沉没有改变远程工具调用行为。
+
+最终门禁结果：
+
+```text
+mvn javadoc:javadoc
+BUILD SUCCESS
+Total time: 1.486 s
+
+openspec validate bind-tools-to-remote-endpoints --strict
+Change 'bind-tools-to-remote-endpoints' is valid
+
+openspec instructions apply --change bind-tools-to-remote-endpoints
+Progress: 59/59 complete
+
+git diff --check
+passed
+```
+
+JavaDoc 保留既有 10 个默认构造器警告，没有新增错误。结构口径保持 17 个生产 Java 源文件、
+40 个生产 class；本次未新增类型。`javap -p` 显示 `McpToolRegistry` 删除一个私有 `headers`
+方法，`RemoteRequestHeaders` 增加一个公开静态 `from` 方法，两个类合计的构造器与方法数量不变。
+JAR 检查只发现两个生产类及 registry 嵌套类，没有包含 `ApiFabricOpenCodeE2eTest` 等测试类。

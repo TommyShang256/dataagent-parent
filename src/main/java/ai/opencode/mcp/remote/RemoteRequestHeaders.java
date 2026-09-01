@@ -57,6 +57,33 @@ public final class RemoteRequestHeaders implements McpTransportContextExtractor<
                 RemoteRequestHeaders.class.getName(), Collections.unmodifiableMap(headers)));
     }
 
+    /**
+     * 从 MCP 传输上下文读取当前请求的不变多值 Header 副本
+     *
+     * @param transportContext MCP 传输上下文，可为 {@code null}
+     * @return 经过类型过滤的不变多值 Header；上下文缺失或结构非法时返回空映射
+     */
+    public static Map<String, List<String>> from(McpTransportContext transportContext) {
+        if (transportContext == null) {
+            return Map.of();
+        }
+        Object value = transportContext.get(RemoteRequestHeaders.class.getName());
+        if (!(value instanceof Map<?, ?> map)) {
+            return Map.of();
+        }
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        map.forEach((name, values) -> {
+            if (name instanceof String headerName && values instanceof List<?> list) {
+                List<String> headerValues = list.stream()
+                        .filter(String.class::isInstance)
+                        .map(String.class::cast)
+                        .toList();
+                result.put(headerName, headerValues);
+            }
+        });
+        return Collections.unmodifiableMap(result);
+    }
+
     static boolean isExcluded(String name) {
         return name == null || EXCLUDED.contains(name.toLowerCase(Locale.ROOT));
     }

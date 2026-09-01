@@ -16,7 +16,12 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 
+import org.springframework.http.HttpEntity;
 import org.springframework.util.StringUtils;
+import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
 /**
@@ -53,7 +58,8 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
         this.objectMapper = objectMapper;
         this.client = apiFabricClient;
         this.requestTimeout = properties.getRequestTimeout();
-        this.bindingFactory = new RemoteToolInvokerBinder(objectMapper);
+        this.bindingFactory = new RemoteToolInvokerBinder(
+                objectMapper, properties.getMaxUploadFileSize().toBytes());
     }
 
     /**
@@ -105,8 +111,10 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
             RemoteToolInvokerBinder.RemoteRequest remoteRequest) throws Exception {
         WebClient.RequestBodySpec request = client.method(remoteRequest.method).uri(remoteRequest.uri);
         request.headers(current -> current.addAll(remoteRequest.headers));
-        if (remoteRequest.body != null) {
-            request.bodyValue(remoteRequest.body);
+        if (remoteRequest.payload.isMultipart()) {
+            request.body(BodyInserters.fromMultipartData(multipartBody(remoteRequest.payload)));
+        } else if (remoteRequest.payload.json != null) {
+            request.bodyValue(remoteRequest.payload.json);
         }
         byte[] response = request.exchangeToMono(clientResponse -> clientResponse.bodyToMono(byte[].class)
                         .defaultIfEmpty(new byte[0])
@@ -118,6 +126,17 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
                                         + new String(bytes, StandardCharsets.UTF_8)))))
                 .block(requestTimeout);
         return convert(response, remoteRequest.returnType);
+    }
+
+    private static MultiValueMap<String, HttpEntity<?>> multipartBody(
+            RemoteToolInvokerBinder.RequestPayload payload) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        RemoteToolInvokerBinder.FilePart file = payload.file;
+        builder.part(file.name, new FileSystemResource(file.path))
+                .filename(file.path.getFileName().toString())
+                .contentType(file.mediaType);
+        payload.fields.forEach((name, values) -> values.forEach(value -> builder.part(name, value)));
+        return builder.build();
     }
 
     private Object convert(byte[] response, Type returnType) throws Exception {

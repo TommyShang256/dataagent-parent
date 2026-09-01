@@ -127,6 +127,16 @@ public class McpFabricProperties {
     private DataSize maxRequestSize = DataSize.ofMegabytes(16);
 
     /**
+     * 单个远程上传文件的最大大小。
+     * <p>
+     * -- GETTER --
+     * 获取单个远程上传文件的最大大小。
+     *
+     * @return 最大上传文件大小
+     */
+    private DataSize maxUploadFileSize = DataSize.ofMegabytes(100);
+
+    /**
      * API Fabric 配置。
      * <p>
      * -- GETTER --
@@ -164,6 +174,19 @@ public class McpFabricProperties {
      */
     public void setCse(Cse cse) {
         this.cse = cse == null ? new Cse() : cse;
+    }
+
+    /**
+     * 设置单个远程上传文件的最大大小。
+     *
+     * @param maxUploadFileSize 最大上传文件大小，必须为正数
+     *                          返回值：无。
+     */
+    public void setMaxUploadFileSize(DataSize maxUploadFileSize) {
+        if (maxUploadFileSize == null || maxUploadFileSize.toBytes() <= 0) {
+            throw new IllegalArgumentException("max-upload-file-size must be greater than zero");
+        }
+        this.maxUploadFileSize = maxUploadFileSize;
     }
 
     /**
@@ -270,6 +293,16 @@ public class McpFabricProperties {
         private Map<String, String> query = new LinkedHashMap<>();
 
         /**
+         * 文件 part 下游名称到字符串工具参数名称的映射。
+         * <p>
+         * -- GETTER --
+         * 获取文件 part 映射。
+         *
+         * @return 保持配置顺序的文件 part 映射
+         */
+        private Map<String, String> files = new LinkedHashMap<>();
+
+        /**
          * Header 映射配置。
          * <p>
          * -- GETTER --
@@ -287,6 +320,16 @@ public class McpFabricProperties {
          */
         public void setQuery(Map<String, String> query) {
             this.query = query == null ? new LinkedHashMap<>() : new LinkedHashMap<>(query);
+        }
+
+        /**
+         * 设置文件 part 映射，并执行空值归一化和防御性复制。
+         *
+         * @param files 下游文件 part 名称到字符串工具参数名称的映射
+         *              返回值：无。
+         */
+        public void setFiles(Map<String, String> files) {
+            this.files = files == null ? new LinkedHashMap<>() : new LinkedHashMap<>(files);
         }
 
         /**

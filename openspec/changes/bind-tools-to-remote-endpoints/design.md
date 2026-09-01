@@ -181,6 +181,10 @@ starter 只要求应用提供标准 Spring `RestOperations`。备选方案：保
 extractor，并以包级静态方法向共享远程绑定代码提供相同策略。排除集合和校验方法不再成为独立公共 API，
 transport context key 使用合并后类名，registry 仍只读取不可变多值 Header 映射。
 
+Transport context key 及其值的类型规约由 `RemoteRequestHeaders` 单独拥有：该类在提取时写入上下文，
+并提供静态读取方法，将缺失、空值或不符合预期结构的上下文安全归一为空映射，并返回防御性不可变副本。
+Registry 不再感知 context key、未类型化值或 Header 副本规则，只消费该读取方法返回的结果。
+
 共享组件从 `RemoteToolInvocationFactory` 重命名为 `RemoteToolInvokerBinder`，准确表达其职责是把注解方法和端点
 配置编译为远程 `ToolRegistration`。该组件继续以内部嵌套 invoker 保存不可变参数映射计划，不拆成额外的
 compiler、plan 和 executor 类型；它通过绑定时由单一 handler 提供的调用函数交出已经组装完成的请求，不持有

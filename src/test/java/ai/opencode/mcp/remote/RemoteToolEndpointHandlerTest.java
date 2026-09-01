@@ -15,20 +15,30 @@ import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.MultiValueMap;
+import org.springframework.util.unit.DataSize;
 import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
 import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.client.ClientRequest;
@@ -50,6 +60,9 @@ import reactor.core.publisher.Mono;
 class RemoteToolEndpointHandlerTest {
 
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+
+    @TempDir
+    Path temporaryDirectory;
 
     @Test
     void isolatesApiFabricAndCseClientDependencies() {
@@ -230,6 +243,183 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    void validatesMultipartFileMappingsAndFormFieldTypesBeforePublishing() {
+        McpFabricProperties multiple = uploadProperties("upload");
+        multiple.getApiFabric().getEndpoints().get("upload").setFiles(Map.of(
+                "dsl", "filePath", "second", "catalog"));
+        assertFailure(multiple, new MultipartTools(), "API Fabric", "upload", "Exactly one file part");
+
+        McpFabricProperties blank = uploadProperties("upload");
+        blank.getApiFabric().getEndpoints().get("upload").setFiles(Map.of(" ", "filePath"));
+        assertFailure(blank, new MultipartTools(), "API Fabric", "upload", "File part", "blank");
+
+        McpFabricProperties unknown = uploadProperties("upload");
+        unknown.getApiFabric().getEndpoints().get("upload").setFiles(Map.of("dsl", "missing"));
+        assertFailure(unknown, new MultipartTools(), "API Fabric", "upload", "missing");
+
+        McpFabricProperties wrongType = uploadProperties("upload");
+        wrongType.getApiFabric().getEndpoints().get("upload").setFiles(Map.of("dsl", "overwrite"));
+        assertFailure(wrongType, new MultipartTools(), "API Fabric", "upload", "overwrite", "String");
+
+        McpFabricProperties conflict = uploadProperties("upload");
+        conflict.getApiFabric().getEndpoints().get("upload").setPathTemplate("/upload/{filePath}");
+        assertFailure(conflict, new MultipartTools(), "API Fabric", "upload", "filePath", "Path", "file part");
+
+        McpFabricProperties queryConflict = uploadProperties("upload");
+        queryConflict.getApiFabric().getEndpoints().get("upload").setQuery(Map.of("source", "filePath"));
+        assertFailure(queryConflict, new MultipartTools(), "API Fabric", "upload", "filePath", "Query", "file part");
+
+        McpFabricProperties headerConflict = uploadProperties("upload");
+        headerConflict.getApiFabric().getEndpoints().get("upload").getHeaders()
+                .setBusiness(Map.of("X-Source", "filePath"));
+        assertFailure(headerConflict, new MultipartTools(),
+                "API Fabric", "upload", "filePath", "business header", "file part");
+
+        assertInvalidFormField("upload_object", "metadata");
+        assertInvalidFormField("upload_map", "metadata");
+        assertInvalidFormField("upload_raw", "metadata");
+        assertInvalidFormField("upload_nested", "metadata");
+        assertInvalidFormField("upload_objects", "metadata");
+
+        McpFabricProperties valid = uploadProperties("upload_array");
+        assertThat(scan(valid, new CaptureExchange("\"ok\"", HttpStatus.OK), new MultipartTools()))
+                .extracting(ToolRegistration::name)
+                .contains("upload_array");
+    }
+
+    @Test
+    void sendsApiFabricMultipartFileAndRequestParameters() throws Exception {
+        Path file = Files.writeString(temporaryDirectory.resolve("schema.unknown-dsl"), "create table demo");
+        McpFabricProperties properties = uploadProperties("upload");
+        CaptureExchange capture = new CaptureExchange("ok", HttpStatus.OK);
+        ToolRegistration tool = tool(scan(properties, capture, new MultipartTools()), "upload");
+
+        Object result = tool.invoker().invoke(Map.of(
+                "filePath", file.toString(),
+                "catalog", "main",
+                "overwrite", true,
+                "tags", List.of("one", "two"),
+                "mode", UploadMode.CREATE), Map.of("catalog", List.of("inbound-header")));
+
+        assertThat(result).isEqualTo("ok");
+        assertThat(capture.method).isEqualTo(HttpMethod.POST);
+        assertThat(capture.headers.getContentType()).isNotNull();
+        assertThat(capture.headers.getContentType().isCompatibleWith(org.springframework.http.MediaType.MULTIPART_FORM_DATA))
+                .isTrue();
+        assertThat(capture.headers.getFirst("catalog")).isEqualTo("inbound-header");
+        assertThat(capture.body)
+                .contains("name=\"dsl\"", "filename=\"schema.unknown-dsl\"",
+                        "Content-Type: application/octet-stream", "create table demo")
+                .contains("name=\"catalog\"", "main")
+                .contains("name=\"overwrite\"", "true")
+                .contains("name=\"mode\"", "CREATE");
+        assertThat(count(capture.body, "name=\"tags\"")).isEqualTo(2);
+
+        Files.delete(file);
+        assertThat(Files.exists(file)).isFalse();
+    }
+
+    @Test
+    void sendsCseMultipartWithEquivalentParts() throws Exception {
+        Path file = Files.writeString(temporaryDirectory.resolve("schema.txt"), "create table demo");
+        McpFabricProperties properties = new McpFabricProperties();
+        McpFabricProperties.CseEndpoint endpoint = new McpFabricProperties.CseEndpoint();
+        endpoint.setMethod("POST");
+        endpoint.setUriTemplate("cse://table-service/v1/createTable");
+        endpoint.setFiles(Map.of("dsl", "filePath"));
+        properties.getCse().getEndpoints().put("upload", endpoint);
+        CaptureRestOperations capture = new CaptureRestOperations("\"ok\"", HttpStatus.OK);
+        ToolRegistration tool = tool(scan(
+                properties, new CaptureExchange("{}", HttpStatus.OK), capture, new MultipartTools()), "upload");
+
+        assertThat(tool.invoker().invoke(Map.of(
+                "filePath", file.toString(),
+                "catalog", "main",
+                "overwrite", false,
+                "tags", List.of("one", "two"),
+                "mode", UploadMode.REPLACE))).isEqualTo("ok");
+
+        assertThat(capture.uri.toString()).isEqualTo("cse://table-service/v1/createTable");
+        assertThat(capture.headers.getContentType()).isEqualTo(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        assertThat(capture.body).isInstanceOf(MultiValueMap.class);
+        @SuppressWarnings("unchecked")
+        MultiValueMap<String, HttpEntity<?>> parts = (MultiValueMap<String, HttpEntity<?>>) capture.body;
+        HttpEntity<?> filePart = parts.getFirst("dsl");
+        assertThat(filePart.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.TEXT_PLAIN);
+        assertThat(filePart.getBody()).isInstanceOf(Resource.class);
+        Resource resource = (Resource) filePart.getBody();
+        assertThat(resource.getFilename()).isEqualTo("schema.txt");
+        assertThat(resource.getContentAsString(StandardCharsets.UTF_8)).isEqualTo("create table demo");
+        assertThat(parts.get("tags")).hasSize(2);
+        assertThat(parts.getFirst("catalog").getBody()).isEqualTo("main");
+
+        Files.delete(file);
+        assertThat(Files.exists(file)).isFalse();
+    }
+
+    @Test
+    void repeatsArrayFieldsAndOmitsMissingNullAndEmptyMultipartValues() throws Exception {
+        Path file = Files.writeString(temporaryDirectory.resolve("schema.dsl"), "dsl");
+        CaptureExchange capture = new CaptureExchange("ok", HttpStatus.OK);
+        ToolRegistration arrayTool = tool(scan(
+                uploadProperties("upload_array"), capture, new MultipartTools()), "upload_array");
+        arrayTool.invoker().invoke(Map.of(
+                "filePath", file.toString(), "codes", new int[]{1, 2}, "date", LocalDate.of(2026, 9, 1)));
+        assertThat(count(capture.body, "name=\"codes\"")).isEqualTo(2);
+        assertThat(capture.body).contains("2026-09-01");
+
+        ToolRegistration upload = tool(scan(uploadProperties("upload"), capture, new MultipartTools()), "upload");
+        Map<String, Object> arguments = new java.util.LinkedHashMap<>();
+        arguments.put("filePath", file.toString());
+        arguments.put("catalog", null);
+        arguments.put("tags", List.of());
+        upload.invoker().invoke(arguments);
+        assertThat(capture.body).doesNotContain(
+                "name=\"catalog\"", "name=\"tags\"", "name=\"overwrite\"", "name=\"mode\"");
+
+        Files.delete(file);
+    }
+
+    @Test
+    void validatesUploadPathsLimitsSymlinksAndReleasesResourcesOnFailure() throws Exception {
+        McpFabricProperties properties = uploadProperties("upload");
+        properties.setMaxUploadFileSize(DataSize.ofBytes(3));
+        CaptureExchange capture = new CaptureExchange("failure", HttpStatus.INTERNAL_SERVER_ERROR);
+        ToolRegistration tool = tool(scan(properties, capture, new MultipartTools()), "upload");
+
+        assertUploadFailure(tool, null, "non-blank String");
+        assertUploadFailure(tool, "\0", "path is invalid");
+        assertUploadFailure(tool, temporaryDirectory.resolve("missing.dsl").toString(), "does not exist");
+        assertUploadFailure(tool, temporaryDirectory.toString(), "not a regular file");
+
+        Path large = Files.writeString(temporaryDirectory.resolve("large.dsl"), "1234");
+        assertUploadFailure(tool, large.toString(), "exceeds limit");
+
+        Path unreadable = Files.writeString(temporaryDirectory.resolve("unreadable.dsl"), "12");
+        try {
+            Set<PosixFilePermission> original = Files.getPosixFilePermissions(unreadable);
+            Files.setPosixFilePermissions(unreadable, Set.of());
+            if (!Files.isReadable(unreadable)) {
+                assertUploadFailure(tool, unreadable.toString(), "not readable");
+            }
+            Files.setPosixFilePermissions(unreadable, original);
+        } catch (UnsupportedOperationException ignored) {
+            // 非 POSIX 文件系统没有可移除的读取权限。
+        }
+
+        Path target = Files.writeString(temporaryDirectory.resolve("target.dsl"), "123");
+        Path link = temporaryDirectory.resolve("link.dsl");
+        Files.createSymbolicLink(link, target.getFileName());
+        assertThatThrownBy(() -> invokeUpload(tool, link.toString()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("upload", "500", "failure");
+        Files.delete(link);
+        Files.delete(target);
+        assertThat(Files.exists(link)).isFalse();
+        assertThat(Files.exists(target)).isFalse();
+    }
+
+    @Test
     void omitsMissingOptionalBodyButKeepsExplicitNullAndSendsNoBodyWhenAllConsumed() throws Exception {
         var properties = validProperties();
         var endpoint = new McpFabricProperties.ApiFabricEndpoint();
@@ -294,11 +484,46 @@ class RemoteToolEndpointHandlerTest {
     }
 
     private void assertFailure(McpFabricProperties properties, String... fragments) {
-        var assertion = assertThatThrownBy(() -> scan(properties, new CaptureExchange("{}", HttpStatus.OK), new ProxyTools()))
+        assertFailure(properties, new ProxyTools(), fragments);
+    }
+
+    private void assertFailure(McpFabricProperties properties, Object bean, String... fragments) {
+        var assertion = assertThatThrownBy(() -> scan(properties, new CaptureExchange("{}", HttpStatus.OK), bean))
                 .isInstanceOf(IllegalStateException.class);
         for (String fragment : fragments) {
             assertion.hasMessageContaining(fragment);
         }
+    }
+
+    private void assertInvalidFormField(String reference, String parameter) {
+        McpFabricProperties properties = uploadProperties(reference);
+        assertFailure(properties, new MultipartTools(), "API Fabric", reference, parameter, "multipart form field");
+    }
+
+    private static void assertUploadFailure(ToolRegistration tool, String filePath, String fragment) {
+        assertThatThrownBy(() -> invokeUpload(tool, filePath))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("upload", String.valueOf(filePath), fragment);
+    }
+
+    private static Object invokeUpload(ToolRegistration tool, String filePath) throws Exception {
+        Map<String, Object> arguments = new java.util.LinkedHashMap<>();
+        arguments.put("filePath", filePath);
+        arguments.put("catalog", "main");
+        arguments.put("overwrite", true);
+        arguments.put("tags", List.of("one"));
+        arguments.put("mode", UploadMode.CREATE);
+        return tool.invoker().invoke(arguments);
+    }
+
+    private static int count(String source, String fragment) {
+        int result = 0;
+        int offset = 0;
+        while ((offset = source.indexOf(fragment, offset)) >= 0) {
+            result++;
+            offset += fragment.length();
+        }
+        return result;
     }
 
     private List<ToolRegistration> scan(
@@ -349,6 +574,15 @@ class RemoteToolEndpointHandlerTest {
         return properties;
     }
 
+    private static McpFabricProperties uploadProperties(String reference) {
+        McpFabricProperties properties = new McpFabricProperties();
+        properties.getApiFabric().setBaseUrl("https://fabric.example/base");
+        McpFabricProperties.ApiFabricEndpoint endpoint = endpoint("POST", "/upload");
+        endpoint.setFiles(Map.of("dsl", "filePath"));
+        properties.getApiFabric().getEndpoints().put(reference, endpoint);
+        return properties;
+    }
+
     private static McpFabricProperties.ApiFabricEndpoint endpoint(String method, String path) {
         var endpoint = new McpFabricProperties.ApiFabricEndpoint();
         endpoint.setMethod(method);
@@ -357,6 +591,53 @@ class RemoteToolEndpointHandlerTest {
     }
 
     record OrderResponse(String id, String status) {
+    }
+
+    enum UploadMode {
+        CREATE,
+        REPLACE
+    }
+
+    record UploadMetadata(String catalog) {
+    }
+
+    static class MultipartTools {
+
+        @Tool
+        String upload(String filePath, String catalog, boolean overwrite, List<String> tags, UploadMode mode) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_array")
+        String uploadArray(String filePath, int[] codes, LocalDate date) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_object")
+        String uploadObject(String filePath, UploadMetadata metadata) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_map")
+        String uploadMap(String filePath, Map<String, String> metadata) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_raw")
+        @SuppressWarnings("rawtypes")
+        String uploadRaw(String filePath, Collection metadata) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_nested")
+        String uploadNested(String filePath, List<List<String>> metadata) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+
+        @Tool(name = "upload_objects")
+        String uploadObjects(String filePath, List<UploadMetadata> metadata) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
     }
 
     static class ProxyTools {
@@ -447,8 +728,14 @@ class RemoteToolEndpointHandlerTest {
                     return Map.of();
                 }
             };
-            return request.body().insert(mock, context).thenReturn(
-                    ClientResponse.create(status).header("Content-Type", "application/json").body(responseBody).build());
+            return request.body().insert(mock, context)
+                    .doOnSuccess(ignored -> {
+                        headers = new HttpHeaders();
+                        headers.putAll(request.headers());
+                        headers.putAll(mock.getHeaders());
+                    })
+                    .thenReturn(ClientResponse.create(status)
+                            .header("Content-Type", "application/json").body(responseBody).build());
         }
     }
 

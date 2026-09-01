@@ -109,3 +109,7 @@
 ## 18. 真实 MCP Client 端到端验证
 
 - [x] 18.1 在 starter 测试路径中启动真实本地 HTTP mock 作为 API Fabric，启动随机端口的 MCP Server，并使用同级 `opencode` 仓库的 MCP client 完成 initialize、`tools/list` 和 `tools/call`；验证标准 MCP 请求能触发 API Fabric HTTP 请求，且 method、URI、Header、Body 与结构化响应均正确
+
+## 19. Transport Header 职责收敛
+
+- [x] 19.1 将 MCP transport context 中 Header 的键约定、类型检查和不可变副本从 `McpToolRegistry` 下沉到 `RemoteRequestHeaders`，registry 只调用类型化读取方法；通过单元测试覆盖空上下文、非法值、非字符串项过滤及防御性副本，并执行完整构建与严格 OpenSpec 校验

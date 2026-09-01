@@ -42,6 +42,11 @@
       "defaultValue": "16MB"
     },
     {
+      "name": "opencode.mcp.max-upload-file-size",
+      "type": "org.springframework.util.unit.DataSize",
+      "defaultValue": "100MB"
+    },
+    {
       "name": "opencode.mcp.api-fabric.base-url",
       "type": "java.lang.String"
     },
