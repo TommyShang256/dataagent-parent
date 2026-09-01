@@ -51,7 +51,7 @@ BFF 负责。文件通过 `FileSystemResource` 交给 Spring 消息写出器，�
 `McpFabricPropertiesTest` 覆盖：
 
 - `max-upload-file-size` 默认 `100MB` 及 `8MB` 绑定；
-- 非正数与 null 拒绝；
+- 非正数与 null 拒绝，以及全部嵌套配置的 null 归一化；
 - `files` 的 YAML 绑定、null 归一化及防御性复制。
 
 `RemoteToolEndpointHandlerTest` 覆盖：
@@ -128,31 +128,56 @@ Schema 中 filePath 仍为字符串，并分别捕获 WebClient 与 RestOperatio
 mvn clean verify
 Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
-Total time: 5.196 s
-Finished at: 2026-09-01T14:09:36+08:00
+Total time: 3.878 s
+Finished at: 2026-09-01T14:28:36+08:00
 
 mvn javadoc:javadoc
 BUILD SUCCESS
-Total time: 1.919 s
-Finished at: 2026-09-01T14:09:47+08:00
+Total time: 1.943 s
+Finished at: 2026-09-01T14:29:19+08:00
 ```
 
 消费端 JavaDoc 保留既有 2 个默认构造器警告，没有新增错误。
 
 ## 全量门禁
 
+### 覆盖率与测试命名强化
+
+首次引入 JaCoCo 后，生产代码指令覆盖率为 91.64%，但分支覆盖率仅为 74.50%。根据缺口补充 Schema
+生成、工具注册、配置归一化、端点配置校验、响应边界、Servlet Header 边界和 scanner 异常传播测试后，
+最终覆盖率如下：
+
+```text
+指令覆盖率：4698 / 4909 = 95.70%
+分支覆盖率： 644 / 706  = 91.22%
+行覆盖率：   957 / 999  = 95.80%
+```
+
+`pom.xml` 在 `verify` 阶段同时检查指令和分支覆盖率，二者最低值均设置为 0.91；任何一项回落都会使
+构建失败。JaCoCo agent 只采集 `ai.opencode.mcp.*`，避免在 JDK 26 下尝试分析第三方动态生成的更高版本
+字节码，同时覆盖全部生产包。
+
+主工程与同级消费端的每个 `@Test`、`@ParameterizedTest`、`@RepeatedTest` 和 `@TestFactory` 用例均有
+中文 `@DisplayName`。`TestDisplayNamePolicyTest` 会扫描两个工程测试源码，缺少注解或名称不含中文时直接
+失败，从而持续阻止新增匿名测试用例。
+
+补测同时发现 `McpToolScanner` 在校验 endpoint handler 是否为 null 前调用 `List.copyOf`，导致错误信息退化为
+无上下文的 `NullPointerException`。实现已改为先做防御性复制并保留不可变视图，再执行原有精确校验；对应
+回归测试已覆盖。
+
 ```text
 mvn clean verify
-Tests run: 62, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 78, Failures: 0, Errors: 0, Skipped: 0
+All coverage checks have been met.
 BUILD SUCCESS
-Total time: 5.796 s
-Finished at: 2026-09-01T14:09:16+08:00
+Total time: 10.285 s
+Finished at: 2026-09-01T14:28:00+08:00
 
 mvn javadoc:javadoc
 BUILD SUCCESS
 10 warnings
-Total time: 2.461 s
-Finished at: 2026-09-01T14:09:47+08:00
+Total time: 2.093 s
+Finished at: 2026-09-01T14:29:19+08:00
 
 openspec validate support-remote-file-upload --strict
 Change 'support-remote-file-upload' is valid
@@ -175,12 +200,13 @@ target/classes 生产 class 数：43
 ```
 
 新增的 3 个生产 class 均是共享请求计划所需的包内嵌套不可变类型：`HeaderMapping`、`RequestPayload` 和
-`FilePart`。`javap -p` 检查绑定器、两个端点处理器和配置属性，构造器及方法参数均不超过 5；
+`FilePart`。`javap -p` 检查 `RemoteToolInvokerBinder`、`ApiFabricToolEndpointHandler`、
+`CseToolEndpointHandler` 和配置属性，构造器及方法参数均不超过 5；
 `ParameterCountPolicyTest` 同时在 starter 和消费端通过。
 
 最终 JAR 为 `target/dataagent-mcp-0.1.0-SNAPSHOT.jar`，包含 multipart 绑定与两个传输处理器，且不包含
 已删除的 `registry/test.class` 或 `ApiFabricOpenCodeE2eTest` 等测试 class。最新构件已在
-2026-09-01T14:09:25+08:00 安装到本地 Maven 仓库，消费端随后执行干净验证。
+2026-09-01T14:28:21+08:00 安装到本地 Maven 仓库，消费端随后执行干净验证。
 
 ```text
 git diff --check
