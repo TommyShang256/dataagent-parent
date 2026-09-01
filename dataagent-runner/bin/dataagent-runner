@@ -1,16 +1,5 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env python3
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required to run dataagent-runner" >&2
-  exit 127
-fi
-
-DATAAGENT_RUNNER_PYTHON=$(sed '1,/^__DATAAGENT_RUNNER_PYTHON__$/d' "$0")
-exec python3 -c "$DATAAGENT_RUNNER_PYTHON" "$@"
-exit 127
-
-__DATAAGENT_RUNNER_PYTHON__
 import http.client
 import ipaddress
 import json

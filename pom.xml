@@ -22,7 +22,6 @@
   <modules>
     <module>dataagent-mcp</module>
     <module>dataagent-web</module>
-    <module>dataagent-runner</module>
   </modules>
 
   <properties>
