@@ -87,7 +87,9 @@ final class McpJsonSchemaGenerator {
             if (metadata != null && !metadata.description().isBlank()) {
                 schema.put("description", metadata.description());
             }
-            properties.put(name, schema);
+            if (properties.putIfAbsent(name, schema) != null) {
+                throw context.failure(name, type, "duplicate tool parameter name");
+            }
             if ((metadata == null || metadata.required()) && !isOptional(type)) {
                 required.add(name);
             }

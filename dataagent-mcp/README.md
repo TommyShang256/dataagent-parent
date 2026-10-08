@@ -189,8 +189,12 @@ RemoteToolEndpointHandler customApiFabricHandler() {
 ## 启动校验
 
 发布任何工具前会一次性校验完整绑定集合，包括：API Fabric/CSE 重复 ref、没有注解工具的 ref、非法 method
-或 URI、模板占位符缺少同名参数、Query/业务 Header 引用未知参数、参数位置冲突、重复下游名称，以及业务
+或 URI、重复工具参数名、缺少主机或包含 Query/Fragment 的 API Fabric 基础地址、模板占位符缺少同名参数、Query/业务 Header 引用未知参数、参数位置冲突、重复下游名称，以及业务
 Header 使用系统排除名称。失败时不会发布部分工具目录。
+
+本地工具与所有远程端点处理器在执行前统一校验必填参数是否存在，以及 primitive 参数是否为 null；
+可选参数允许缺失，引用类型允许显式 null。远程调用保留业务参数原值，并对动态 Query 名称和值单独编码。
+原生 MCP 工具结果的 `isError=true` 会记录为失败审计，即使调用没有抛出异常。
 
 工具统一通过 `@Tool` 注解声明。本地工具直接执行 Java 方法；名称匹配 API Fabric 或 CSE 端点
 配置的工具由对应 handler 替换调用目标，但继续使用同一注解签名生成 Schema。
@@ -230,7 +234,7 @@ public void createTable(
 }
 ```
 
-上传前会校验路径非空、语法有效、存在、为可读普通文件并且不超过
+上传前会校验路径非空、语法有效、为绝对路径、存在、为可读普通文件并且不超过
 `dataagent.mcp.max-upload-file-size`，默认上限为 `100MB`。文件名取路径末段；无法探测媒体类型时使用
 `application/octet-stream`。API Fabric 与 CSE 都使用文件 Resource 写出内容，不先把完整文件载入 byte 数组。
 

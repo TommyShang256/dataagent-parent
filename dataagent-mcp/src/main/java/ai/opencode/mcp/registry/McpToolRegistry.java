@@ -310,7 +310,10 @@ public final class McpToolRegistry implements SmartInitializingSingleton {
         ToolAuditEvent event = new ToolAuditEvent(
                 Instant.now(),
                 operation,
-                details.errorType() == null ? ToolAuditEvent.Outcome.SUCCESS : ToolAuditEvent.Outcome.FAILURE,
+                details.errorType() != null
+                        || (details.result() instanceof McpSchema.CallToolResult result
+                        && Boolean.TRUE.equals(result.isError()))
+                        ? ToolAuditEvent.Outcome.FAILURE : ToolAuditEvent.Outcome.SUCCESS,
                 new ToolAuditEvent.Target(registration.name(), registration.type()),
                 details);
         try {

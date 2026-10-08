@@ -140,6 +140,67 @@ class RemoteToolEndpointHandlerTest {
     }
 
     @Test
+    @DisplayName("两种远程通道编码 Query 保留字符且不二次编码固定模板")
+    void encodesQueryValuesWithoutChangingFixedTemplate() throws Exception {
+        String value = "a&admin=true a+b#订单%2F";
+        String encoded = "a%26admin%3Dtrue%20a%2Bb%23%E8%AE%A2%E5%8D%95%252F";
+        McpFabricProperties properties = validProperties();
+        properties.getApiFabric().getEndpoints().get("create_order")
+                .setPathTemplate("/tenants/{tenantId}/orders?fixed=x%20y");
+        CaptureExchange fabric = new CaptureExchange("{}", HttpStatus.OK);
+        CaptureRestOperations cse = new CaptureRestOperations("[]", HttpStatus.OK);
+        properties.getCse().getEndpoints().get("reserve_inventory").setQuery(Map.of("sku", "sku"));
+        List<ToolRegistration> tools = scan(properties, fabric, cse, new ProxyTools());
+
+        tool(tools, "create_order").invoker().invoke(Map.of(
+                "tenantId", "tenant/a", "tags", List.of(value, "{tenantId}"), "bizMode", "x"));
+        assertThat(fabric.uri.toString()).isEqualTo(
+                "https://fabric.example/base/tenants/tenant%2Fa/orders?fixed=x%20y&tag="
+                        + encoded + "&tag=%7BtenantId%7D");
+        tool(tools, "reserve_inventory").invoker().invoke(Map.of("warehouseId", "W", "sku", value));
+        assertThat(cse.uri.toString()).isEqualTo(
+                "cse://inventory-service/warehouses/W/reservations?sku=" + encoded);
+    }
+
+    @Test
+    @DisplayName("必填 Query 和业务 Header 缺失时在远程请求前拒绝")
+    void rejectsMissingRemoteQueryAndHeaderParameters() {
+        CaptureExchange capture = new CaptureExchange("{}", HttpStatus.OK);
+        ToolRegistration remote = tool(scan(validProperties(), capture, new ProxyTools()), "create_order");
+        assertThatThrownBy(() -> remote.invoker().invoke(Map.of("tenantId", "T", "bizMode", "x")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("create_order", "tags");
+        assertThatThrownBy(() -> remote.invoker().invoke(Map.of("tenantId", "T", "tags", List.of())))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("create_order", "bizMode");
+        assertThat(capture.method).isNull();
+    }
+
+    @Test
+    @DisplayName("CSE 拒绝缺失或 null 的 primitive Body 并保留可选参数语义")
+    void validatesRemotePrimitiveBodyAndOptionalParameters() throws Exception {
+        CaptureRestOperations capture = new CaptureRestOperations("[]", HttpStatus.OK);
+        McpFabricProperties properties = new McpFabricProperties();
+        properties.getCse().getEndpoints().put("reserve_inventory",
+                validProperties().getCse().getEndpoints().get("reserve_inventory"));
+        ToolRegistration remote = tool(scan(properties, new CaptureExchange("{}", HttpStatus.OK),
+                capture, new PrimitiveTools()), "reserve_inventory");
+        assertThatThrownBy(() -> remote.invoker().invoke(Map.of("warehouseId", "W")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("reserve_inventory", "sku");
+        Map<String, Object> arguments = new java.util.LinkedHashMap<>();
+        arguments.put("warehouseId", "W");
+        arguments.put("sku", null);
+        assertThatThrownBy(() -> remote.invoker().invoke(arguments))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("sku", "null");
+        assertThat(capture.uri).isNull();
+        arguments.put("sku", 1);
+        remote.invoker().invoke(arguments);
+        assertThat(mapper.<JsonNode>valueToTree(capture.body)).isEqualTo(mapper.readTree("{\"sku\":1}"));
+        arguments.put("optional", null);
+        remote.invoker().invoke(arguments);
+        assertThat(mapper.<JsonNode>valueToTree(capture.body))
+                .isEqualTo(mapper.readTree("{\"sku\":1,\"optional\":null}"));
+    }
+
+    @Test
     @DisplayName("未配置 RestTemplate 时在发布 CSE 工具前失败")
     void failsBeforePublishingCseToolWhenRestTemplateIsNotConfigured() {
         assertThatThrownBy(() -> scan(
@@ -272,6 +333,17 @@ class RemoteToolEndpointHandlerTest {
         McpFabricProperties invalidBaseUrl = validProperties();
         invalidBaseUrl.getApiFabric().setBaseUrl("https://invalid host");
         assertFailure(invalidBaseUrl, "API Fabric", "base-url", "invalid URI");
+
+        for (String baseUrl : List.of("http:/fabric", "https:///base", "https://bad_host/base")) {
+            McpFabricProperties hostless = validProperties();
+            hostless.getApiFabric().setBaseUrl(baseUrl);
+            assertFailure(hostless, "API Fabric", "base-url", "valid host");
+        }
+        for (String baseUrl : List.of("https://fabric.example?mode=x", "https://fabric.example#section")) {
+            McpFabricProperties ambiguous = validProperties();
+            ambiguous.getApiFabric().setBaseUrl(baseUrl);
+            assertFailure(ambiguous, "API Fabric", "base-url", "query or fragment");
+        }
 
         McpFabricProperties blankCseUri = validProperties();
         blankCseUri.getCse().getEndpoints().get("reserve_inventory").setUriTemplate(" ");
@@ -428,9 +500,11 @@ class RemoteToolEndpointHandlerTest {
         arguments.put("filePath", file.toString());
         arguments.put("catalog", null);
         arguments.put("tags", List.of());
+        arguments.put("overwrite", false);
+        arguments.put("mode", UploadMode.CREATE);
         upload.invoker().invoke(arguments);
         assertThat(capture.body).doesNotContain(
-                "name=\"catalog\"", "name=\"tags\"", "name=\"overwrite\"", "name=\"mode\"");
+                "name=\"catalog\"", "name=\"tags\"");
 
         Files.delete(file);
     }
@@ -445,6 +519,7 @@ class RemoteToolEndpointHandlerTest {
 
         assertUploadFailure(tool, null, "non-blank String");
         assertUploadFailure(tool, "\0", "path is invalid");
+        assertUploadFailure(tool, "pom.xml", "path must be absolute");
         assertUploadFailure(tool, temporaryDirectory.resolve("missing.dsl").toString(), "does not exist");
         assertUploadFailure(tool, temporaryDirectory.toString(), "not a regular file");
 
@@ -714,6 +789,13 @@ class RemoteToolEndpointHandlerTest {
 
         @Tool(name = "upload_boolean")
         String uploadBoolean(String filePath, Boolean enabled) {
+            throw new AssertionError("Remote proxy method must not execute");
+        }
+    }
+
+    static class PrimitiveTools {
+        @Tool(name = "reserve_inventory")
+        List<String> reserve(String warehouseId, int sku, @ToolParam(required = false) String optional) {
             throw new AssertionError("Remote proxy method must not execute");
         }
     }

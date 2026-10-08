@@ -2,6 +2,7 @@ package ai.opencode.mcp.scanner;
 
 import ai.opencode.mcp.annotation.Tool;
 import ai.opencode.mcp.annotation.ToolParam;
+import ai.opencode.mcp.api.ToolInvoker;
 import ai.opencode.mcp.api.ToolRegistration;
 import ai.opencode.mcp.remote.RemoteToolEndpointHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -89,7 +90,38 @@ public final class McpToolScanner {
                 .map(method -> {
                     ToolRegistration registration = toRegistration(toolProvider, method);
                     RemoteToolEndpointHandler handler = handlers.get(registration.name());
-                    return handler == null ? registration : handler.bind(method, registration);
+                    if (handler == null) {
+                        return registration;
+                    }
+                    ToolRegistration bound = handler.bind(method, registration);
+                    return bound.withInvoker(new ToolInvoker() {
+                        /**
+                         * 校验工具参数后执行无请求 Header 的远程调用。
+                         *
+                         * @param arguments 工具参数
+                         * @return 远程执行结果
+                         * @throws Exception 参数校验或远程调用失败时抛出
+                         */
+                        @Override
+                        public Object invoke(Map<String, Object> arguments) throws Exception {
+                            return invoke(arguments, Map.of());
+                        }
+
+                        /**
+                         * 在任何远程处理器执行前校验注解参数约束，并保留原始业务值。
+                         *
+                         * @param arguments 工具参数
+                         * @param headers 当前请求的不可变多值 Header
+                         * @return 远程执行结果
+                         * @throws Exception 参数校验或远程调用失败时抛出
+                         */
+                        @Override
+                        public Object invoke(Map<String, Object> arguments, Map<String, List<String>> headers)
+                                throws Exception {
+                            validateArguments(method.getParameters(), arguments, bound.name());
+                            return bound.invoker().invoke(arguments, headers);
+                        }
+                    });
                 })
                 .toList();
     }
@@ -151,7 +183,7 @@ public final class McpToolScanner {
         return new ToolRegistration(
                 name,
                 new ToolRegistration.Definition(title, description, schemaGenerator.forMethod(method)),
-                arguments -> invoke(target, invocable, method.getParameters(), arguments),
+                arguments -> invoke(target, invocable, method.getParameters(), arguments, name),
                 Tool.Type.LOCAL,
                 new ToolRegistration.Behavior(
                         annotation.readOnly(),
@@ -161,8 +193,10 @@ public final class McpToolScanner {
                         Set.of(annotation.allowedCallers())));
     }
 
-    private Object invoke(Object target, Method method, Parameter[] parameters, Map<String, Object> arguments)
+    private Object invoke(
+            Object target, Method method, Parameter[] parameters, Map<String, Object> arguments, String toolName)
             throws Exception {
+        validateArguments(parameters, arguments, toolName);
         Map<String, Object> safeArguments = arguments == null ? Map.of() : arguments;
         Object[] values = new Object[parameters.length];
         for (int index = 0; index < parameters.length; index++) {
@@ -176,17 +210,10 @@ public final class McpToolScanner {
                     values[index] = emptyOptional(parameter.getType());
                     continue;
                 }
-                boolean required = metadata == null || metadata.required();
-                if (required) {
-                    throw new IllegalArgumentException("Missing required tool parameter: " + name);
-                }
                 values[index] = null;
                 continue;
             }
             if (value == null) {
-                if (parameter.getType().isPrimitive()) {
-                    throw new IllegalArgumentException("Primitive tool parameter cannot be null: " + name);
-                }
                 if (isOptional(parameter.getType())) {
                     values[index] = emptyOptional(parameter.getType());
                     continue;
@@ -208,6 +235,24 @@ public final class McpToolScanner {
                 throw error;
             }
             throw exception;
+        }
+    }
+
+    private static void validateArguments(
+            Parameter[] parameters, Map<String, Object> arguments, String toolName) {
+        Map<String, Object> safeArguments = arguments == null ? Map.of() : arguments;
+        for (Parameter parameter : parameters) {
+            ToolParam metadata = parameter.getAnnotation(ToolParam.class);
+            String name = parameterName(parameter, metadata);
+            if (!safeArguments.containsKey(name)) {
+                if ((metadata == null || metadata.required()) && !isOptional(parameter.getType())) {
+                    throw new IllegalArgumentException(
+                            "Missing required tool parameter: tool=" + toolName + ", parameter=" + name);
+                }
+            } else if (safeArguments.get(name) == null && parameter.getType().isPrimitive()) {
+                throw new IllegalArgumentException(
+                        "Primitive tool parameter cannot be null: tool=" + toolName + ", parameter=" + name);
+            }
         }
     }
 

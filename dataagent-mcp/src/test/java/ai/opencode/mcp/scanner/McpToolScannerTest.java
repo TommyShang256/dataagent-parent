@@ -116,6 +116,14 @@ class McpToolScannerTest {
         return arguments;
     }
 
+    @Test
+    @DisplayName("扫描阶段拒绝重复的显式参数名称")
+    void rejectsDuplicateParameterNames() {
+        assertThatThrownBy(() -> scanner.scan(new DuplicateParameterTools()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("same", "duplicate tool parameter name", "duplicate");
+    }
+
     private ToolRegistration tool(String name) {
         return scanner.scan(new ParameterTools()).stream()
                 .filter(registration -> registration.name().equals(name))
@@ -175,6 +183,13 @@ class McpToolScannerTest {
     static class InvalidTools {
         @Tool
         void invalid(@ToolParam(required = false) int value) {
+        }
+    }
+
+    static class DuplicateParameterTools {
+        @Tool
+        String duplicate(@ToolParam(name = "same") String first, @ToolParam(name = "same") String second) {
+            return first + second;
         }
     }
 }

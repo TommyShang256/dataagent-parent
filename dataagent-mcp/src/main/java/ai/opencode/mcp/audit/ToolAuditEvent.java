@@ -152,6 +152,15 @@ public record ToolAuditEvent(
     public String errorType() {
       return errorType;
     }
+
+    /**
+     * 获取用于判断原生 MCP 错误结果的调用结果。
+     *
+     * @return 调用结果；注册或异常事件返回 {@code null}
+     */
+    public Object result() {
+      return result;
+    }
   }
 
   /** 审计操作类别。 */

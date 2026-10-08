@@ -45,7 +45,7 @@ class DataAgentMcpIntegrationTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private static final Path RUNNER = Path.of("..", "dataagent-runner", "bin", "dataagent-runner")
+    private static final Path RUNNER = Path.of("..", "dataagent-mcp", "src", "main", "resources", "dataagent-runner")
             .toAbsolutePath()
             .normalize();
 

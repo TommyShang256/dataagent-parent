@@ -159,6 +159,24 @@ class McpToolRegistryTest {
     }
 
     @Test
+    @DisplayName("原生 MCP 错误结果同时返回错误并记录失败审计")
+    void auditsNativeErrorResultsAsFailures() {
+        List<ToolAuditEvent> events = new ArrayList<>();
+        McpSchema.CallToolResult nativeError = McpSchema.CallToolResult.builder()
+                .content(List.of(McpSchema.TextContent.builder("business failure").build()))
+                .isError(true).build();
+        McpToolRegistry registry = registry(List.of(registration("native", arguments -> nativeError)),
+                new FakeToolServer(), events::add);
+        registry.afterSingletonsInstantiated();
+
+        assertThat(registry.call(find(registry, "native"), Map.of())).isSameAs(nativeError);
+        assertThat(events).extracting(ToolAuditEvent::outcome)
+                .containsExactly(ToolAuditEvent.Outcome.SUCCESS, ToolAuditEvent.Outcome.FAILURE);
+        assertThat(events.getLast().result()).isSameAs(nativeError);
+        assertThat(events.getLast().errorType()).isNull();
+    }
+
+    @Test
     @DisplayName("生成的工具规格调用 MCP 处理器")
     void generatedSpecificationInvokesMcpHandler() {
         McpToolRegistry registry = registry(List.of(), new FakeToolServer(), event -> {

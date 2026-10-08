@@ -15,12 +15,14 @@ import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.springframework.web.util.UriBuilder;
+import org.springframework.web.util.UriUtils;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -347,7 +349,9 @@ final class RemoteToolInvokerBinder {
             factory.setEncodingMode(DefaultUriBuilderFactory.EncodingMode.VALUES_ONLY);
             UriBuilder builder = factory.uriString(target.uriTemplate);
             parameters.query.forEach((name, source) -> values(arguments.get(source))
-                    .forEach(value -> builder.queryParam(name, value)));
+                    .forEach(value -> builder.queryParam(
+                            UriUtils.encode(name, StandardCharsets.UTF_8),
+                            UriUtils.encode(value, StandardCharsets.UTF_8))));
             Map<String, Object> variables = new LinkedHashMap<>();
             for (String name : parameters.path) {
                 if (!arguments.containsKey(name) || arguments.get(name) == null) {
@@ -404,6 +408,9 @@ final class RemoteToolInvokerBinder {
                 path = Path.of(text);
             } catch (InvalidPathException exception) {
                 throw fileFailure(source, original, "path is invalid");
+            }
+            if (!path.isAbsolute()) {
+                throw fileFailure(source, original, "path must be absolute");
             }
             if (!Files.exists(path)) {
                 throw fileFailure(source, original, "file does not exist");

@@ -175,6 +175,12 @@ public final class ApiFabricToolEndpointHandler implements RemoteToolEndpointHan
             if (!Set.of("http", "https").contains(uri.getScheme().toLowerCase(Locale.ROOT))) {
                 fail("base-url", "must use the http or https scheme");
             }
+            if (!StringUtils.hasText(uri.getHost())) {
+                fail("base-url", "must contain a valid host");
+            }
+            if (uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                fail("base-url", "must not contain a query or fragment");
+            }
         } catch (IllegalArgumentException exception) {
             fail("base-url", "is an invalid URI");
         }
